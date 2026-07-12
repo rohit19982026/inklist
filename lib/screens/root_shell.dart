@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/smart_reminder_service.dart';
+import '../services/notification_permission_service.dart';
 import 'todo_screen.dart';
 import 'week_screen.dart';
 import 'pomodoro_screen.dart';
@@ -23,8 +24,12 @@ class _RootShellState extends State<RootShell> {
   @override
   void initState() {
     super.initState();
-    // Background housekeeping on every app launch.
+    // Background housekeeping on every app launch. Notification permission
+    // is requested first — without it (Android 13+), every notification the
+    // app posts is silently dropped, including the alarm's own full-screen
+    // notification and every Smart Reminder check-in.
     Future.microtask(() async {
+      await NotificationPermissionService.request();
       await SmartReminderService.syncSchedule();
     });
   }

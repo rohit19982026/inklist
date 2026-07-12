@@ -30,6 +30,24 @@ class AlarmSchedulerService {
     } catch (_) {}
   }
 
+  /// Android 14+ only: a separate toggle from POST_NOTIFICATIONS that gates
+  /// whether the alarm's full-screen ringing UI is allowed to auto-launch.
+  /// Defaults to true (nothing to fix) on older Android or if the platform
+  /// call fails, so this never blocks the rest of Settings from rendering.
+  static Future<bool> canUseFullScreenIntent() async {
+    try {
+      return await _methods.invokeMethod<bool>('canUseFullScreenIntent') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> requestFullScreenIntentPermission() async {
+    try {
+      await _methods.invokeMethod('requestFullScreenIntentPermission');
+    } catch (_) {}
+  }
+
   /// Schedules (or re-schedules) the next occurrence of [task]'s alarm.
   /// No-ops if the task has no alarm enabled/time, or no future occurrence
   /// exists within the next year.

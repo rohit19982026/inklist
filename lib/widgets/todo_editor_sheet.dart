@@ -6,6 +6,7 @@ import '../models/todo_task.dart';
 import '../services/recurrence_rule.dart';
 import '../services/groq_service.dart';
 import '../services/alarm_scheduler_service.dart';
+import '../services/notification_permission_service.dart';
 
 /// Create / edit a to-do task. Forked from GoalEditorSheet's structure —
 /// same drag-handle/sheet-decoration/pill-row idioms. The alarm toggle is
@@ -132,6 +133,10 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
       return;
     }
     setState(() => _alarmEnabled = true);
+    // The alarm's ringing screen is delivered via a full-screen notification
+    // — without POST_NOTIFICATIONS granted, the OS drops it silently, so this
+    // is just as load-bearing as the exact-alarm permission checked below.
+    await NotificationPermissionService.request();
     final canSchedule = await AlarmSchedulerService.canScheduleExactAlarms();
     if (canSchedule || !mounted) return;
     await showDialog<void>(

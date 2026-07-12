@@ -1,6 +1,8 @@
 package com.rohit.inklist
 
+import android.app.NotificationManager
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
@@ -54,6 +56,28 @@ class MainActivity : FlutterActivity() {
 
                     "requestDndAccess" -> {
                         startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+                        result.success(null)
+                    }
+
+                    // Android 14+ gates the alarm's full-screen ringing UI behind a
+                    // separate toggle from POST_NOTIFICATIONS — apps not pre-approved
+                    // as a default alarm/calling app may need the user to flip it on
+                    // manually even though USE_FULL_SCREEN_INTENT is in the manifest.
+                    "canUseFullScreenIntent" -> {
+                        if (Build.VERSION.SDK_INT >= 34) {
+                            val nm = getSystemService(NotificationManager::class.java)
+                            result.success(nm?.canUseFullScreenIntent() ?: true)
+                        } else {
+                            result.success(true)
+                        }
+                    }
+
+                    "requestFullScreenIntentPermission" -> {
+                        if (Build.VERSION.SDK_INT >= 34) {
+                            val intent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
+                            intent.data = Uri.parse("package:$packageName")
+                            startActivity(intent)
+                        }
                         result.success(null)
                     }
 

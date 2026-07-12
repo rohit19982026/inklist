@@ -5,6 +5,7 @@ import '../widgets/section_header.dart';
 import '../services/groq_service.dart';
 import '../services/alarm_scheduler_service.dart';
 import '../services/smart_reminder_service.dart';
+import '../services/notification_permission_service.dart';
 import '../models/todo_task.dart';
 import 'font_picker_screen.dart';
 
@@ -21,6 +22,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _aiEnabled = true;
   String? _groqApiKey;
   bool _canScheduleExactAlarms = true;
+  bool _canUseFullScreenIntent = true;
+  bool _notificationsGranted = true;
+  bool _notificationsPermanentlyDenied = false;
   bool _smartRemindersEnabled = false;
   List<TimeOfDayMs> _smartReminderTimes = SmartReminderService.defaultTimes;
 
@@ -37,6 +41,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AlarmSchedulerService.canScheduleExactAlarms(),
       SmartReminderService.isEnabled(),
       SmartReminderService.getCheckInTimes(),
+      NotificationPermissionService.isGranted(),
+      NotificationPermissionService.isPermanentlyDenied(),
+      AlarmSchedulerService.canUseFullScreenIntent(),
     ]);
     if (!mounted) return;
     setState(() {
@@ -45,8 +52,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _canScheduleExactAlarms = r[2] as bool;
       _smartRemindersEnabled = r[3] as bool;
       _smartReminderTimes = r[4] as List<TimeOfDayMs>;
+      _notificationsGranted = r[5] as bool;
+      _notificationsPermanentlyDenied = r[6] as bool;
+      _canUseFullScreenIntent = r[7] as bool;
       _loading = false;
     });
+  }
+
+  Future<void> _fixNotificationPermission() async {
+    if (_notificationsPermanentlyDenied) {
+      await NotificationPermissionService.openSettings();
+    } else {
+      await NotificationPermissionService.request();
+    }
+    _load();
   }
 
   @override
@@ -135,6 +154,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                   const SizedBox(height: 24),
 
+                  // ── Notifications (foundational for alarms + reminders) ────
+                  SectionHeader(
+                    title: 'Notifications',
+                    subtitle: _notificationsGranted
+                        ? 'Allowed'
+                        : 'Blocked — alarms and reminders can\'t alert you',
+                  ),
+                  _settingsGroup([
+                    _settingRow(
+                      icon: _notificationsGranted
+                          ? Icons.notifications_active_rounded
+                          : Icons.notifications_off_rounded,
+                      tint: _notificationsGranted
+                          ? AppColors.success
+                          : AppColors.danger,
+                      title: 'Allow Notifications',
+                      value: _notificationsGranted
+                          ? 'On · required for task alarms and smart reminders'
+                          : 'Off · tap to grant — nothing can alert you without this',
+                      onTap: _notificationsGranted ? null : _fixNotificationPermission,
+                      trailing: _notificationsGranted
+                          ? const Icon(Icons.check_circle_rounded,
+                              color: AppColors.success)
+                          : null,
+                    ),
+                  ]),
+
+                  const SizedBox(height: 24),
+
                   // ── AI Assistant (Groq) ────────────────────────────────────
                   SectionHeader(
                     title: 'AI Assistant',
@@ -196,6 +244,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             'Required for task alarms to ring on time — tap to grant',
                         onTap: () async {
                           await AlarmSchedulerService.requestExactAlarmPermission();
+                          _load();
+                        },
+                      ),
+                    if (!_canUseFullScreenIntent)
+                      _settingRow(
+                        icon: Icons.fullscreen_rounded,
+                        tint: AppColors.warning,
+                        title: 'Allow Full-Screen Alarms',
+                        value:
+                            'Required for the alarm to pop up over your lock screen — tap to grant',
+                        onTap: () async {
+                          await AlarmSchedulerService.requestFullScreenIntentPermission();
                           _load();
                         },
                       ),

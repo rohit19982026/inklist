@@ -3,6 +3,7 @@ package com.rohit.inklist
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -65,8 +66,13 @@ class AlarmRingingService : Service() {
         val taskId = intent?.getStringExtra(EXTRA_TASK_ID) ?: ""
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Task"
 
-        startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification(title))
-        launchRingingActivity(taskId, title)
+        startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification(taskId, title))
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            // Pre-Android 10 has no background-activity-start restriction, and
+            // some older OEM skins are slow to honor a full-screen-intent
+            // notification — launch directly too, for belt-and-suspenders.
+            launchRingingActivity(taskId, title)
+        }
         startRinging()
 
         safetyTimer?.cancel()
@@ -85,6 +91,18 @@ class AlarmRingingService : Service() {
             putExtra(EXTRA_TITLE, title)
         }
         startActivity(intent)
+    }
+
+    private fun ringingActivityPendingIntent(taskId: String, title: String): PendingIntent {
+        val intent = Intent(this, AlarmRingingActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_TASK_ID, taskId)
+            putExtra(EXTRA_TITLE, title)
+        }
+        return PendingIntent.getActivity(
+            this, taskId.hashCode(), intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
     }
 
     private fun startRinging() {
@@ -130,14 +148,29 @@ class AlarmRingingService : Service() {
         stopSelf()
     }
 
-    private fun buildForegroundNotification(title: String): Notification {
+    /**
+     * This notification IS how the ringing screen actually launches on
+     * Android 10+: a Service started from a BroadcastReceiver can't call
+     * startActivity() directly (background-activity-start restriction), but
+     * a full-screen-intent notification is the OS-sanctioned exception,
+     * which is exactly what USE_FULL_SCREEN_INTENT (declared in the
+     * manifest) exists for. If the system declines to auto-launch it (e.g.
+     * the device is unlocked and in active use, or — Android 14+ — the user
+     * hasn't granted the separate full-screen-intent toggle) this still
+     * surfaces as a heads-up notification the user can tap to open.
+     */
+    private fun buildForegroundNotification(taskId: String, title: String): Notification {
+        val pending = ringingActivityPendingIntent(taskId, title)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher_foreground)
             .setContentTitle("Alarm: $title")
             .setContentText("Tap to open")
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
+            .setFullScreenIntent(pending, true)
+            .setContentIntent(pending)
             .build()
     }
 
