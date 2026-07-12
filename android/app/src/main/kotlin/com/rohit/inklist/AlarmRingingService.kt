@@ -18,6 +18,9 @@ import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.core.app.NotificationCompat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Foreground service that loops the system alarm ringtone + vibration until
@@ -31,6 +34,10 @@ class AlarmRingingService : Service() {
         const val CHANNEL_NAME = "Task Alarms"
         const val FOREGROUND_NOTIFICATION_ID = 20001
         const val ACTION_STOP = "com.rohit.inklist.action.STOP_ALARM_RING"
+        // Tapped directly from the notification's action buttons — lets the
+        // user snooze/dismiss without the full-screen UI having launched.
+        const val ACTION_NOTIF_SNOOZE = "com.rohit.inklist.action.NOTIF_SNOOZE"
+        const val ACTION_NOTIF_DISMISS = "com.rohit.inklist.action.NOTIF_DISMISS"
         val EXTRA_TASK_ID = AlarmSchedulerHelper.EXTRA_TASK_ID
         val EXTRA_TITLE = AlarmSchedulerHelper.EXTRA_TITLE
         private const val SAFETY_TIMEOUT_MS = 5 * 60 * 1000L
@@ -65,6 +72,17 @@ class AlarmRingingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val taskId = intent?.getStringExtra(EXTRA_TASK_ID) ?: ""
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Task"
+
+        when (intent?.action) {
+            ACTION_NOTIF_SNOOZE -> {
+                snoozeFromNotification(taskId, title)
+                return START_NOT_STICKY
+            }
+            ACTION_NOTIF_DISMISS -> {
+                dismissFromNotification(taskId)
+                return START_NOT_STICKY
+            }
+        }
 
         startForeground(FOREGROUND_NOTIFICATION_ID, buildForegroundNotification(taskId, title))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -103,6 +121,40 @@ class AlarmRingingService : Service() {
             this, taskId.hashCode(), intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+    }
+
+    // ── Notification action buttons — mirror AlarmRingingActivity's own
+    // Snooze/Dismiss so the user can act straight from the notification,
+    // e.g. if the full-screen UI didn't auto-launch on this device/OS.
+
+    private fun notificationActionPendingIntent(
+        action: String, requestCodeOffset: Int, taskId: String, title: String
+    ): PendingIntent {
+        val intent = Intent(this, AlarmRingingService::class.java).apply {
+            this.action = action
+            putExtra(EXTRA_TASK_ID, taskId)
+            putExtra(EXTRA_TITLE, title)
+        }
+        return PendingIntent.getService(
+            this, taskId.hashCode() + requestCodeOffset, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    private fun snoozeFromNotification(taskId: String, title: String) {
+        val requestCode = taskId.hashCode() + AlarmSchedulerHelper.SNOOZE_OFFSET
+        val triggerAt = System.currentTimeMillis() + 10 * 60 * 1000L
+        AlarmSchedulerHelper.schedule(this, requestCode, taskId, title, triggerAt, "none")
+        stopRinging()
+    }
+
+    private fun dismissFromNotification(taskId: String) {
+        try {
+            TodoPrefsHelper.markCompletedToday(applicationContext, taskId)
+        } catch (_: Exception) {
+            // Best-effort — the alarm still stops ringing even if this fails.
+        }
+        stopRinging()
     }
 
     private fun startRinging() {
@@ -160,17 +212,27 @@ class AlarmRingingService : Service() {
      * surfaces as a heads-up notification the user can tap to open.
      */
     private fun buildForegroundNotification(taskId: String, title: String): Notification {
-        val pending = ringingActivityPendingIntent(taskId, title)
+        val contentPending = ringingActivityPendingIntent(taskId, title)
+        val snoozePending =
+            notificationActionPendingIntent(ACTION_NOTIF_SNOOZE, 1, taskId, title)
+        val dismissPending =
+            notificationActionPendingIntent(ACTION_NOTIF_DISMISS, 2, taskId, title)
+        val timeLabel = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher_foreground)
-            .setContentTitle("Alarm: $title")
-            .setContentText("Tap to open")
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setColor(NotificationIcons.BRAND_COLOR)
+            .setLargeIcon(NotificationIcons.appLargeIcon(this))
+            .setContentTitle(title)
+            .setContentText("Alarm · $timeLabel")
+            .setSubText("InkList")
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
-            .setFullScreenIntent(pending, true)
-            .setContentIntent(pending)
+            .setFullScreenIntent(contentPending, true)
+            .setContentIntent(contentPending)
+            .addAction(R.drawable.ic_stat_snooze, "Snooze 10 min", snoozePending)
+            .addAction(R.drawable.ic_stat_dismiss, "Dismiss", dismissPending)
             .build()
     }
 

@@ -300,7 +300,13 @@ class SmartReminderService : Service() {
             if (nm.getNotificationChannel(REMINDER_CHANNEL_ID) == null) {
                 val channel = NotificationChannel(
                     REMINDER_CHANNEL_ID, "Smart Reminders", NotificationManager.IMPORTANCE_DEFAULT
-                ).apply { description = "AI check-ins about tasks that need your attention" }
+                ).apply {
+                    description = "AI check-ins about tasks that need your attention"
+                    enableLights(true)
+                    lightColor = NotificationIcons.BRAND_COLOR
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0, 250, 150, 250)
+                }
                 nm.createNotificationChannel(channel)
             }
         }
@@ -312,9 +318,12 @@ class SmartReminderService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = NotificationCompat.Builder(this, REMINDER_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setColor(NotificationIcons.BRAND_COLOR)
+            .setLargeIcon(NotificationIcons.appLargeIcon(this))
             .setContentTitle("Task check-in")
             .setContentText(message)
+            .setSubText("InkList")
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
@@ -354,7 +363,8 @@ class SmartReminderService : Service() {
             }
         }
         return NotificationCompat.Builder(this, TRANSIENT_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setColor(NotificationIcons.BRAND_COLOR)
             .setContentTitle("Checking your tasks…")
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setSilent(true)
