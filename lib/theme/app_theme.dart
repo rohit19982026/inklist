@@ -8,20 +8,20 @@ import 'package:google_fonts/google_fonts.dart';
 /// warm cool→hot ramp. Trend charts use multi-stop gradients so the eye reads
 /// progression rather than a flat line.
 class AppColors {
-  // ── Surfaces ─────────────────────────────────────────────────────────────
-  static const bg              = Color(0xFFF6F7FB);
-  static const card            = Color(0xFFFFFFFF);
-  static const surface         = Color(0xFFEEF1F8);
-  static const elevated        = Color(0xFFFFFFFF);
-  static const overlay         = Color(0xFFF9FAFD);
+  // ── Surfaces — warm paper ────────────────────────────────────────────────
+  static const bg              = Color(0xFFFBF6EC);   // cream paper
+  static const card            = Color(0xFFFFFDF8);   // white paper
+  static const surface         = Color(0xFFF3ECDC);   // kraft
+  static const elevated        = Color(0xFFFFFDF8);
+  static const overlay         = Color(0xFFFCF8EF);
 
-  // ── Brand ────────────────────────────────────────────────────────────────
-  static const primary         = Color(0xFF4F46E5);   // indigo-600
-  static const primaryDark     = Color(0xFF3730A3);
-  static const primaryLight    = Color(0xFFEEF0FF);
-  static const primaryGhost    = Color(0xFFF6F7FE);
-  static const accent          = Color(0xFF7C3AED);   // violet-600
-  static const accentLight     = Color(0xFFF1ECFF);
+  // ── Brand — coral ink ────────────────────────────────────────────────────
+  static const primary         = Color(0xFFEF6B52);   // coral (the "Save" accent)
+  static const primaryDark     = Color(0xFFD4553D);
+  static const primaryLight    = Color(0xFFFDE7E1);
+  static const primaryGhost    = Color(0xFFFFF6F3);
+  static const accent          = Color(0xFF7C6BD6);   // soft violet (AI)
+  static const accentLight     = Color(0xFFEDE7FB);
 
   // ── Aesthetic accents (used across KPIs, charts, badges) ────────────────
   static const coral           = Color(0xFFFB7185);
@@ -56,17 +56,28 @@ class AppColors {
   static const purple  = accent;
   static const pink    = coral;
 
-  // ── Text — deep slate ramp ──────────────────────────────────────────────
-  static const textPrimary     = Color(0xFF0F172A);
-  static const textSecondary   = Color(0xFF475569);
-  static const textMuted       = Color(0xFF94A3B8);
-  static const textHint        = Color(0xFFCBD5E1);
+  // ── Text — ink ramp ─────────────────────────────────────────────────────
+  static const textPrimary     = Color(0xFF2B2A28);   // charcoal ink
+  static const textSecondary   = Color(0xFF6B6862);
+  static const textMuted       = Color(0xFF9A968C);
+  static const textHint        = Color(0xFFCFC8BA);
+
+  // ── Highlighter pastels (planner blocks) ────────────────────────────────
+  static const hlYellow        = Color(0xFFFFF3B0);
+  static const hlPink          = Color(0xFFFFD9E3);
+  static const hlMint          = Color(0xFFCDEFD8);
+  static const hlLavender      = Color(0xFFE6DBFF);
+  static const hlPeach         = Color(0xFFFFE2C7);
+  static const hlSky           = Color(0xFFCDEAFB);
+  static const List<Color> highlighters = [
+    hlYellow, hlPink, hlMint, hlLavender, hlPeach, hlSky,
+  ];
 
   // ── Lines / fills ────────────────────────────────────────────────────────
-  static const border          = Color(0xFFE2E8F0);
-  static const divider         = Color(0xFFEDF2F7);
-  static const fill            = Color(0xFFF1F5F9);
-  static const fillSecondary   = Color(0xFFF8FAFC);
+  static const border          = Color(0xFFE7DECC);
+  static const divider         = Color(0xFFEFE7D6);
+  static const fill            = Color(0xFFF4EEE1);
+  static const fillSecondary   = Color(0xFFFAF6EC);
 
   // ── Chart palette (vivid, distinguishable) ──────────────────────────────
   static const chartPrimary    = primary;
@@ -167,11 +178,11 @@ class AppColors {
   // ── Gradients ────────────────────────────────────────────────────────────
   static const brandGradient = LinearGradient(
     begin: Alignment.topLeft, end: Alignment.bottomRight,
-    colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
+    colors: [Color(0xFFF6845F), Color(0xFFEF6B7D)],
   );
   static const heroGradient = LinearGradient(
     begin: Alignment.topLeft, end: Alignment.bottomRight,
-    colors: [Color(0xFF312E81), Color(0xFF4F46E5), Color(0xFF7C3AED)],
+    colors: [Color(0xFFF07E5C), Color(0xFFEF6B7D), Color(0xFF7C6BD6)],
   );
   static const sunsetCardGradient = LinearGradient(
     begin: Alignment.topLeft, end: Alignment.bottomRight,
@@ -205,10 +216,10 @@ class Radii {
   static const xl = 20.0; static const x2 = 24.0; static const pill = 999.0;
 }
 
-/// Typography — Plus Jakarta Sans (modern fintech) for UI,
-/// Inter retained for tabular numeric display where needed.
+/// Typography — handwritten planner aesthetic.
+/// Caveat (marker) for large titles, Kalam (legible handwriting) for body/UI.
 class T {
-  // Helper that returns the chosen UI font
+  /// Legible handwriting — used for body, labels and most UI text.
   static TextStyle _f({
     required double size,
     required FontWeight weight,
@@ -217,7 +228,7 @@ class T {
     double? height,
     List<FontFeature>? features,
   }) =>
-      GoogleFonts.plusJakartaSans(
+      GoogleFonts.kalam(
         fontSize: size,
         fontWeight: weight,
         color: color,
@@ -226,24 +237,38 @@ class T {
         fontFeatures: features,
       );
 
+  /// Marker-style handwriting — used for large headings only (stays legible big).
+  static TextStyle _hand({
+    required double size,
+    required FontWeight weight,
+    Color color = AppColors.textPrimary,
+    double letterSpacing = 0,
+    double? height,
+  }) =>
+      GoogleFonts.caveat(
+        fontSize: size,
+        fontWeight: weight,
+        color: color,
+        letterSpacing: letterSpacing,
+        height: height,
+      );
+
   static TextStyle display(double size,
-      {Color color = AppColors.textPrimary, double spacing = -1.0,
-      FontWeight weight = FontWeight.w800}) =>
-      _f(size: size, weight: weight, color: color, letterSpacing: spacing,
-          features: [const FontFeature.tabularFigures()]);
+      {Color color = AppColors.textPrimary, double spacing = 0,
+      FontWeight weight = FontWeight.w700}) =>
+      _hand(size: size + 6, weight: weight, color: color, letterSpacing: spacing);
 
   static TextStyle hero({Color color = AppColors.textPrimary}) =>
-      _f(size: 40, weight: FontWeight.w800, color: color, letterSpacing: -1.2,
-          features: [const FontFeature.tabularFigures()]);
+      _hand(size: 48, weight: FontWeight.w700, color: color, letterSpacing: 0);
 
   static TextStyle largeTitle({Color color = AppColors.textPrimary}) =>
-      _f(size: 30, weight: FontWeight.w800, color: color, letterSpacing: -0.7);
+      _hand(size: 38, weight: FontWeight.w700, color: color, letterSpacing: 0);
   static TextStyle title1({Color color = AppColors.textPrimary}) =>
-      _f(size: 24, weight: FontWeight.w800, color: color, letterSpacing: -0.5);
+      _hand(size: 32, weight: FontWeight.w700, color: color, letterSpacing: 0);
   static TextStyle title2({Color color = AppColors.textPrimary}) =>
-      _f(size: 20, weight: FontWeight.w700, color: color, letterSpacing: -0.4);
+      _hand(size: 28, weight: FontWeight.w700, color: color, letterSpacing: 0);
   static TextStyle title3({Color color = AppColors.textPrimary}) =>
-      _f(size: 18, weight: FontWeight.w700, color: color, letterSpacing: -0.3);
+      _hand(size: 24, weight: FontWeight.w700, color: color, letterSpacing: 0);
 
   static TextStyle headline({Color color = AppColors.textPrimary}) =>
       _f(size: 16, weight: FontWeight.w700, color: color, letterSpacing: -0.2);
@@ -284,7 +309,7 @@ class AppTheme {
         onSurface: AppColors.textPrimary,
         error: AppColors.danger,
       ),
-      textTheme: GoogleFonts.plusJakartaSansTextTheme().apply(
+      textTheme: GoogleFonts.kalamTextTheme().apply(
         bodyColor: AppColors.textPrimary, displayColor: AppColors.textPrimary),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent, elevation: 0,
