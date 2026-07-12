@@ -137,6 +137,26 @@ void main() {
     });
   });
 
+  group('parseHabitSuggestions', () {
+    test('parses a habits array', () {
+      const raw = '{"habits": ["Drink 2L water", "Read 10 pages", "Stretch"]}';
+      final result = GroqService.parseHabitSuggestions(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data, ['Drink 2L water', 'Read 10 pages', 'Stretch']);
+    });
+
+    test('trims blanks and fails when nothing usable remains', () {
+      const raw = '{"habits": ["", "  "]}';
+      final result = GroqService.parseHabitSuggestions(raw);
+      expect(result.isSuccess, isFalse);
+    });
+
+    test('malformed JSON degrades to a fail rather than throwing', () {
+      final result = GroqService.parseHabitSuggestions('not json [[');
+      expect(result.isSuccess, isFalse);
+    });
+  });
+
   group('parseFocusCoachResponse', () {
     test('parses task + message', () {
       const raw = '{"task": "Finish the report", "message": "It\'s your '

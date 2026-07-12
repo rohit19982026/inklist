@@ -6,8 +6,8 @@ import '../services/notification_permission_service.dart';
 import 'todo_screen.dart';
 import 'week_screen.dart';
 import 'pomodoro_screen.dart';
+import 'habits_screen.dart';
 import 'settings_screen.dart';
-import 'placeholder_screen.dart';
 
 /// InkList bottom-nav shell: Today / Week / Focus / Habits.
 /// Settings + Premium live behind the app-bar gear on Today to keep the tab
@@ -39,7 +39,7 @@ class _RootShellState extends State<RootShell> {
     TodoScreen(),
     WeekScreen(),
     PomodoroScreen(),
-    PlaceholderScreen(title: 'Habits', message: 'Habit tracker — coming next.'),
+    HabitsScreen(),
   ];
 
   static const _tabs = <(IconData, IconData, String)>[

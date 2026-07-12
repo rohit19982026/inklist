@@ -234,6 +234,31 @@ class GroqService {
     return parseFocusCoachResponse(resp.data!);
   }
 
+  /// AI habit ideas for the Habits tab. Given the habits the user already
+  /// tracks, suggests a handful of complementary, concrete daily habits.
+  static Future<GroqResult<List<String>>> suggestHabits(
+      List<String> existingTitles) async {
+    final key = await getApiKey();
+    if (key == null || key.isEmpty) {
+      return const GroqResult.fail(
+          'Add your Groq API key in Settings to use AI features');
+    }
+    final existing = existingTitles.isEmpty
+        ? 'none yet'
+        : existingTitles.join(', ');
+    final system = 'You suggest daily habits for a habit tracker. The user '
+        'already tracks: $existing. Suggest 5 concrete, specific, doable '
+        'daily habits that complement those without duplicating them. Keep '
+        'each under 4 words, action-oriented (e.g. "Drink 2L water", "Read '
+        '10 pages"). Respond ONLY with JSON: {"habits": [string, ...]}.';
+    final resp = await _post(key, [
+      {'role': 'system', 'content': system},
+      {'role': 'user', 'content': 'Suggest habits.'},
+    ], jsonMode: true);
+    if (!resp.isSuccess) return GroqResult.fail(resp.error);
+    return parseHabitSuggestions(resp.data!);
+  }
+
   // ── Pure parse functions (unit-testable, no network) ────────────────────
 
   static GroqResult<WeeklyPlanDraft> parseWeeklyPlanResponse(String rawContent) {
@@ -294,6 +319,25 @@ class GroqService {
     } catch (_) {
       return const GroqResult.fail(
           'Groq returned an unexpected response — pick a task manually');
+    }
+  }
+
+  static GroqResult<List<String>> parseHabitSuggestions(String rawContent) {
+    try {
+      final j = jsonDecode(rawContent) as Map<String, dynamic>;
+      final list = (j['habits'] as List?) ?? const [];
+      final habits = list
+          .whereType<String>()
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (habits.isEmpty) {
+        return const GroqResult.fail('Groq returned no habits — try again');
+      }
+      return GroqResult.ok(habits);
+    } catch (_) {
+      return const GroqResult.fail(
+          'Groq returned an unexpected response — try again or add manually');
     }
   }
 
