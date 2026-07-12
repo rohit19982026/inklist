@@ -9,6 +9,7 @@ import '../services/data_sync.dart';
 import '../services/alarm_scheduler_service.dart';
 import '../widgets/todo_editor_sheet.dart';
 import '../widgets/ink_widgets.dart';
+import '../widgets/alarm_feedback.dart';
 import 'weekly_plan_preview_screen.dart';
 
 /// InkList "Week" — a MON–SUN planner grid. Each day is a paper card with its
@@ -78,25 +79,7 @@ class _WeekScreenState extends State<WeekScreen> with WidgetsBindingObserver {
     await TodoService.upsert(t);
     final ok = await AlarmSchedulerService.syncTaskAlarm(t);
     DataSync.notifyChanged();
-    if (!ok && t.alarmEnabled) _showAlarmFailureWarning();
-  }
-
-  void _showAlarmFailureWarning() {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Alarm couldn\'t be scheduled — grant "Alarms & reminders" access',
-          style: T.footnote(c: Colors.white)),
-      backgroundColor: AppColors.danger,
-      behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.all(16),
-      duration: const Duration(seconds: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
-      action: SnackBarAction(
-        label: 'FIX',
-        textColor: Colors.white,
-        onPressed: () => AlarmSchedulerService.requestExactAlarmPermission(),
-      ),
-    ));
+    if (mounted) await showAlarmSchedulingFeedback(context, t, ok);
   }
 
   Future<void> _addForDay(DateTime day) async {
