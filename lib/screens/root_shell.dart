@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../services/smart_reminder_service.dart';
 import 'todo_screen.dart';
 import 'week_screen.dart';
+import 'pomodoro_screen.dart';
 import 'settings_screen.dart';
 import 'placeholder_screen.dart';
 
@@ -32,7 +33,7 @@ class _RootShellState extends State<RootShell> {
   late final List<Widget> _pages = const [
     TodoScreen(),
     WeekScreen(),
-    PlaceholderScreen(title: 'Focus', message: 'Pomodoro focus timer — coming next.'),
+    PomodoroScreen(),
     PlaceholderScreen(title: 'Habits', message: 'Habit tracker — coming next.'),
   ];
 

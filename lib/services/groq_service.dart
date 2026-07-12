@@ -7,6 +7,7 @@ import '../models/groq_result.dart';
 import '../models/weekly_plan_draft.dart';
 import '../models/quick_add_draft.dart';
 import '../models/todo_task.dart';
+import '../models/focus_suggestion.dart';
 
 /// Groq (groq.com) AI integration — the app's only network dependency.
 /// Every method degrades gracefully: AI is an enhancement, never a blocker.
@@ -202,6 +203,37 @@ class GroqService {
     return parseQuickAddResponse(resp.data!);
   }
 
+  /// AI focus coach for the Pomodoro tab: given the user's pending tasks,
+  /// picks the single best one to work on in the next focus session and
+  /// returns a one-line reason. [taskTitle] echoes one of the given titles
+  /// (or is empty) so the UI can auto-bind the session to that task.
+  static Future<GroqResult<FocusSuggestion>> focusCoach(
+      List<TodoTask> candidates) async {
+    final key = await getApiKey();
+    if (key == null || key.isEmpty) {
+      return const GroqResult.fail(
+          'Add your Groq API key in Settings to use AI features');
+    }
+    if (candidates.isEmpty) {
+      return const GroqResult.fail('Add some tasks first, then ask for focus');
+    }
+    const system = 'You are a focus coach for a 25-minute Pomodoro session. '
+        'Given the user\'s pending tasks (a JSON list with title/priority), '
+        'pick the single best task to focus on right now. Respond with JSON: '
+        '{"task": string, "message": string}. "task" MUST be exactly one of '
+        'the given titles verbatim, or "" if none fit. "message" is one '
+        'encouraging sentence under 18 words on why to start there. No fluff.';
+    final payload = jsonEncode(candidates
+        .map((t) => {'title': t.title, 'priority': t.priority})
+        .toList());
+    final resp = await _post(key, [
+      {'role': 'system', 'content': system},
+      {'role': 'user', 'content': payload},
+    ], jsonMode: true);
+    if (!resp.isSuccess) return GroqResult.fail(resp.error);
+    return parseFocusCoachResponse(resp.data!);
+  }
+
   // ── Pure parse functions (unit-testable, no network) ────────────────────
 
   static GroqResult<WeeklyPlanDraft> parseWeeklyPlanResponse(String rawContent) {
@@ -245,6 +277,23 @@ class GroqService {
     } catch (_) {
       return const GroqResult.fail(
           'Groq returned an unexpected response — try again or add manually');
+    }
+  }
+
+  static GroqResult<FocusSuggestion> parseFocusCoachResponse(String rawContent) {
+    try {
+      final j = jsonDecode(rawContent) as Map<String, dynamic>;
+      final message = (j['message'] as String?)?.trim() ?? '';
+      if (message.isEmpty) {
+        return const GroqResult.fail('Groq returned an empty suggestion');
+      }
+      return GroqResult.ok(FocusSuggestion(
+        taskTitle: (j['task'] as String?)?.trim() ?? '',
+        message: message,
+      ));
+    } catch (_) {
+      return const GroqResult.fail(
+          'Groq returned an unexpected response — pick a task manually');
     }
   }
 

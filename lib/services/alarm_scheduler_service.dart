@@ -58,6 +58,35 @@ class AlarmSchedulerService {
     } catch (_) {}
   }
 
+  // ── Pomodoro completion chime ──────────────────────────────────────────
+  // Reuses the proven task-alarm native path (no new Kotlin) so a focus/break
+  // phase still notifies the user when it ends while the app is backgrounded.
+  // Uses a fixed request code so a new phase overwrites the previous alarm.
+  // The screen cancels this the moment a phase completes in the foreground,
+  // where it plays a soft in-app chime instead.
+  static const _pomodoroRequestCode = 990001;
+
+  static Future<void> schedulePomodoroChime(
+      DateTime endsAt, String label) async {
+    if (!endsAt.isAfter(DateTime.now())) return;
+    try {
+      await _methods.invokeMethod('scheduleTaskAlarm', {
+        'id': _pomodoroRequestCode,
+        'taskId': 'pomodoro',
+        'title': label,
+        'triggerAtMillis': endsAt.millisecondsSinceEpoch,
+        'recurrenceRule': 'none',
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> cancelPomodoroChime() async {
+    try {
+      await _methods
+          .invokeMethod('cancelTaskAlarm', {'id': _pomodoroRequestCode});
+    } catch (_) {}
+  }
+
   /// Cancels any existing alarm for [task], then reschedules it if enabled —
   /// covers create, edit (including toggling the alarm off), and delete via
   /// the same call site pattern. Returns false only when the task wants an

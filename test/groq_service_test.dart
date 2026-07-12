@@ -136,4 +136,34 @@ void main() {
       expect(result.isSuccess, isFalse);
     });
   });
+
+  group('parseFocusCoachResponse', () {
+    test('parses task + message', () {
+      const raw = '{"task": "Finish the report", "message": "It\'s your '
+          'highest-priority task and 25 minutes will make a real dent."}';
+      final result = GroqService.parseFocusCoachResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data!.taskTitle, 'Finish the report');
+      expect(result.data!.hasTask, isTrue);
+      expect(result.data!.message, contains('highest-priority'));
+    });
+
+    test('empty task string yields hasTask == false', () {
+      const raw = '{"task": "", "message": "Pick anything and just begin."}';
+      final result = GroqService.parseFocusCoachResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data!.hasTask, isFalse);
+    });
+
+    test('missing message degrades to a fail', () {
+      const raw = '{"task": "Something"}';
+      final result = GroqService.parseFocusCoachResponse(raw);
+      expect(result.isSuccess, isFalse);
+    });
+
+    test('malformed JSON degrades to a fail rather than throwing', () {
+      final result = GroqService.parseFocusCoachResponse('not json {{');
+      expect(result.isSuccess, isFalse);
+    });
+  });
 }
