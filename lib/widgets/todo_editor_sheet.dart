@@ -13,15 +13,19 @@ import '../services/alarm_scheduler_service.dart';
 /// milestone); the time picker below is purely informational until then.
 class TodoEditorSheet extends StatefulWidget {
   final TodoTask? existing;
-  const TodoEditorSheet({super.key, this.existing});
+  final DateTime? initialDate;
+  const TodoEditorSheet({super.key, this.existing, this.initialDate});
 
-  /// Returns the saved task, or null if dismissed.
-  static Future<TodoTask?> show(BuildContext context, {TodoTask? existing}) {
+  /// Returns the saved task, or null if dismissed. Pass [initialDate] to
+  /// pre-fill the due date for a brand-new task (e.g. from the Week grid).
+  static Future<TodoTask?> show(BuildContext context,
+      {TodoTask? existing, DateTime? initialDate}) {
     return showModalBottomSheet<TodoTask>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => TodoEditorSheet(existing: existing),
+      builder: (_) =>
+          TodoEditorSheet(existing: existing, initialDate: initialDate),
     );
   }
 
@@ -61,7 +65,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     final t = widget.existing;
     _title = TextEditingController(text: t?.title ?? '');
     _description = TextEditingController(text: t?.description ?? '');
-    _dueDate = t?.dueDate ?? DateTime.now();
+    _dueDate = t?.dueDate ?? widget.initialDate ?? DateTime.now();
     _time = t?.alarmTime;
     // Alarm on by default for every new task (InkList's "don't forget" promise).
     _alarmEnabled = t?.alarmEnabled ?? true;

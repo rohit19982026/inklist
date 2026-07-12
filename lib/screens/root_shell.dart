@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/smart_reminder_service.dart';
 import 'todo_screen.dart';
+import 'week_screen.dart';
 import 'settings_screen.dart';
 import 'placeholder_screen.dart';
 
@@ -30,7 +31,7 @@ class _RootShellState extends State<RootShell> {
   // Each tab kept alive via IndexedStack so state survives switching.
   late final List<Widget> _pages = const [
     TodoScreen(),
-    PlaceholderScreen(title: 'Week', message: 'Weekly planner grid — coming next.'),
+    WeekScreen(),
     PlaceholderScreen(title: 'Focus', message: 'Pomodoro focus timer — coming next.'),
     PlaceholderScreen(title: 'Habits', message: 'Habit tracker — coming next.'),
   ];
