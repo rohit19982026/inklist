@@ -38,7 +38,16 @@ void main() {
       expect(times[2].minute, 0);
     });
 
-    test('isEnabled defaults to false', () async {
+    test('isEnabled defaults to true (opt-out, not opt-in)', () async {
+      expect(await SmartReminderService.isEnabled(), isTrue);
+    });
+
+    test('ensureInitialized materializes the default-on value only once', () async {
+      await SmartReminderService.ensureInitialized();
+      expect(await SmartReminderService.isEnabled(), isTrue);
+      // A subsequent explicit opt-out must not be clobbered by ensureInitialized.
+      await SmartReminderService.setEnabled(false);
+      await SmartReminderService.ensureInitialized();
       expect(await SmartReminderService.isEnabled(), isFalse);
     });
 

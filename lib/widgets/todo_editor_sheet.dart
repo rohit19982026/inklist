@@ -235,6 +235,25 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     }
   }
 
+  /// Default alarm time when the user enables the alarm but picks no time.
+  /// Prefers 9:00 AM, but for a task due *today* whose 9 AM has already
+  /// passed it rolls forward to the next top-of-hour so the alarm still has a
+  /// future moment to fire (instead of silently landing in the past).
+  TimeOfDayMs _defaultAlarmTime() {
+    final now = DateTime.now();
+    final isToday = _dueDate.year == now.year &&
+        _dueDate.month == now.month &&
+        _dueDate.day == now.day;
+    final nineAm = DateTime(_dueDate.year, _dueDate.month, _dueDate.day, 9, 0);
+    if (!isToday || nineAm.isAfter(now)) {
+      return const TimeOfDayMs(hour: 9, minute: 0);
+    }
+    // Today, past 9 AM → next top-of-hour, if one still exists before midnight.
+    final nextHour = now.hour + 1;
+    if (nextHour <= 23) return TimeOfDayMs(hour: nextHour, minute: 0);
+    return const TimeOfDayMs(hour: 9, minute: 0); // late-night edge, best effort
+  }
+
   void _save() {
     final title = _title.text.trim();
     if (title.isEmpty) {
@@ -256,9 +275,9 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     }
     final desc = _description.text.trim();
     // Alarm-on-by-default: if the user left the alarm on but didn't pick a
-    // time, default to 9:00 AM so every task still gets a reminder.
-    final effectiveTime =
-        _time ?? (_alarmEnabled ? const TimeOfDayMs(hour: 9, minute: 0) : null);
+    // time, choose a sensible default that is still in the future so the
+    // alarm actually fires (see _defaultAlarmTime).
+    final effectiveTime = _time ?? (_alarmEnabled ? _defaultAlarmTime() : null);
     final task = TodoTask(
       id: widget.existing?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
       title: title,

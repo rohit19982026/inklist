@@ -30,6 +30,7 @@ class _RootShellState extends State<RootShell> {
     // notification and every Smart Reminder check-in.
     Future.microtask(() async {
       await NotificationPermissionService.request();
+      await SmartReminderService.ensureInitialized();
       await SmartReminderService.syncSchedule();
     });
   }

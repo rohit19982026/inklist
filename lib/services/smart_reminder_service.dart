@@ -19,14 +19,25 @@ class SmartReminderService {
     TimeOfDayMs(hour: 21, minute: 0),
   ];
 
+  /// On by default — the daily "review your plan / review your day" nudge is
+  /// a core promise, so a fresh install opts in unless the user turns it off.
   static Future<bool> isEnabled() async {
     final p = await SharedPreferences.getInstance();
-    return p.getBool(_kEnabled) ?? false;
+    return p.getBool(_kEnabled) ?? true;
   }
 
   static Future<void> setEnabled(bool value) async {
     final p = await SharedPreferences.getInstance();
     await p.setBool(_kEnabled, value);
+  }
+
+  /// Materializes the default-on value into storage on first run so the
+  /// native side (BootReceiver, SmartReminderScheduler) — which reads the raw
+  /// pref with its own default of false — agrees that reminders are enabled
+  /// even before the user ever visits Settings. Idempotent.
+  static Future<void> ensureInitialized() async {
+    final p = await SharedPreferences.getInstance();
+    if (!p.containsKey(_kEnabled)) await p.setBool(_kEnabled, true);
   }
 
   static Future<List<TimeOfDayMs>> getCheckInTimes() async {

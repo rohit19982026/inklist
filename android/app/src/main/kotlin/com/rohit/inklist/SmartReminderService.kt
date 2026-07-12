@@ -45,6 +45,7 @@ class SmartReminderService : Service() {
         private const val TRANSIENT_NOTIFICATION_ID = 20002
         private const val REMINDER_CHANNEL_ID = "smart_reminders"
         private const val REMINDER_NOTIFICATION_ID = 10004
+        private const val REVIEW_NOTIFICATION_ID = 10005
 
         private const val MAX_NOTIFY_PER_DAY = 4
         private const val MAX_ALARM_PER_DAY = 2
@@ -54,7 +55,12 @@ class SmartReminderService : Service() {
     }
 
     private data class RelevantTask(val title: String, val priority: String, val overdue: Boolean)
-    private data class NagState(val notifyCount: Int, val alarmCount: Int)
+    private data class NagState(
+        val notifyCount: Int,
+        val alarmCount: Int,
+        val reviewAm: Boolean = false,
+        val reviewPm: Boolean = false,
+    )
     private data class Decision(val urgency: String, val message: String)
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -74,12 +80,19 @@ class SmartReminderService : Service() {
     private fun runCheckIn() {
         val todayCal = Calendar.getInstance()
         val todayKey = dateKey(todayCal)
+        val hour = todayCal.get(Calendar.HOUR_OF_DAY)
 
         val tasks = TodoPrefsHelper.readTasks(applicationContext)
         val relevant = computeRelevantTasks(tasks, todayCal, todayKey)
-        if (relevant.isEmpty()) return // nothing to report — leave the cache as-is
-
         val nagState = readNagState(todayKey)
+
+        // Compulsory daily review nudge — fires for everyone, once per period
+        // per day, independent of tasks, AI, or an API key. This is the core
+        // "review your plan today / review your day" promise. When it posts we
+        // stop here so this check-in never stacks two notifications at once.
+        if (maybePostDailyReview(hour, relevant, nagState, todayKey)) return
+
+        if (relevant.isEmpty()) return // nothing else to report — leave cache as-is
         if (nagState.notifyCount >= MAX_NOTIFY_PER_DAY && nagState.alarmCount >= MAX_ALARM_PER_DAY) {
             return // hard cap reached for everything that could still fire
         }
@@ -151,7 +164,12 @@ class SmartReminderService : Service() {
         return try {
             val obj = JSONObject(raw)
             if (obj.optString("date") != todayKey) NagState(0, 0)
-            else NagState(obj.optInt("notifyCount", 0), obj.optInt("alarmCount", 0))
+            else NagState(
+                obj.optInt("notifyCount", 0),
+                obj.optInt("alarmCount", 0),
+                obj.optBoolean("reviewAm", false),
+                obj.optBoolean("reviewPm", false),
+            )
         } catch (e: Exception) {
             NagState(0, 0)
         }
@@ -163,8 +181,41 @@ class SmartReminderService : Service() {
             put("date", todayKey)
             put("notifyCount", state.notifyCount)
             put("alarmCount", state.alarmCount)
+            put("reviewAm", state.reviewAm)
+            put("reviewPm", state.reviewPm)
         }
         prefs.edit().putString(KEY_NAG_STATE, obj.toString()).apply()
+    }
+
+    /**
+     * The compulsory daily review nudge. Morning (before noon) posts "review
+     * your plan"; evening (5pm+) posts "review your day". Each fires at most
+     * once per day via the reviewAm/reviewPm flags, and works with zero tasks,
+     * no AI, and no API key. Returns true if it posted something this run.
+     */
+    private fun maybePostDailyReview(
+        hour: Int, relevant: List<RelevantTask>, nagState: NagState, todayKey: String
+    ): Boolean {
+        val open = relevant.size
+        if (hour < 12 && !nagState.reviewAm) {
+            val msg = if (open > 0)
+                "You have $open thing${if (open == 1) "" else "s"} planned today. Review your plan ☀️"
+            else
+                "A fresh day — plan what matters most ☀️"
+            postReview("Good morning", msg)
+            writeNagState(todayKey, nagState.copy(reviewAm = true))
+            return true
+        }
+        if (hour >= 17 && !nagState.reviewPm) {
+            val msg = if (open > 0)
+                "$open task${if (open == 1) "" else "s"} still open. Review your day 🌙"
+            else
+                "All caught up — set up tomorrow? 🌙"
+            postReview("Evening check-in", msg)
+            writeNagState(todayKey, nagState.copy(reviewPm = true))
+            return true
+        }
+        return false
     }
 
     private fun writeBriefCache(todayKey: String, text: String) {
@@ -294,14 +345,20 @@ class SmartReminderService : Service() {
         }
     }
 
-    private fun postNotify(message: String) {
+    private fun postNotify(message: String) =
+        postNotification("Task check-in", message, REMINDER_NOTIFICATION_ID)
+
+    private fun postReview(title: String, message: String) =
+        postNotification(title, message, REVIEW_NOTIFICATION_ID)
+
+    private fun postNotification(title: String, message: String, id: Int) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(REMINDER_CHANNEL_ID) == null) {
                 val channel = NotificationChannel(
                     REMINDER_CHANNEL_ID, "Smart Reminders", NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
-                    description = "AI check-ins about tasks that need your attention"
+                    description = "Daily plan reviews and check-ins about tasks that need attention"
                     enableLights(true)
                     lightColor = NotificationIcons.BRAND_COLOR
                     enableVibration(true)
@@ -314,14 +371,14 @@ class SmartReminderService : Service() {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingTap = PendingIntent.getActivity(
-            this, REMINDER_NOTIFICATION_ID, tapIntent,
+            this, id, tapIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = NotificationCompat.Builder(this, REMINDER_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_notify)
             .setColor(NotificationIcons.BRAND_COLOR)
             .setLargeIcon(NotificationIcons.appLargeIcon(this))
-            .setContentTitle("Task check-in")
+            .setContentTitle(title)
             .setContentText(message)
             .setSubText("InkList")
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
@@ -331,10 +388,10 @@ class SmartReminderService : Service() {
             .setContentIntent(pendingTap)
             .build()
         try {
-            NotificationManagerCompat.from(this).notify(REMINDER_NOTIFICATION_ID, notification)
+            NotificationManagerCompat.from(this).notify(id, notification)
         } catch (e: SecurityException) {
-            // POST_NOTIFICATIONS not granted on API 33+ — the alarm/notify
-            // decision still gets written to the brief cache regardless.
+            // POST_NOTIFICATIONS not granted on API 33+ — the decision still
+            // gets written to the brief cache regardless.
         }
     }
 
