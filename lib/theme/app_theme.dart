@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'app_fonts.dart';
 
 /// Modern fintech design system — Plus Jakarta Sans + vibrant aesthetic palette.
 ///
@@ -217,9 +218,13 @@ class Radii {
 }
 
 /// Typography — handwritten planner aesthetic.
-/// Caveat (marker) for large titles, Kalam (legible handwriting) for body/UI.
+/// The whole app renders in the user's chosen font (see [AppFonts]); the
+/// default is a natural print-handwriting face. Both the body role (`_f`) and
+/// the large-heading role (`_hand`) follow the selection, so changing the font
+/// re-styles everything. Numerals use a fixed tabular sans so timers/counters
+/// stay aligned and legible regardless of the choice.
 class T {
-  /// Legible handwriting — used for body, labels and most UI text.
+  /// Body/label/UI text in the selected font.
   static TextStyle _f({
     required double size,
     required FontWeight weight,
@@ -228,7 +233,8 @@ class T {
     double? height,
     List<FontFeature>? features,
   }) =>
-      GoogleFonts.kalam(
+      GoogleFonts.getFont(
+        AppFonts.family,
         fontSize: size,
         fontWeight: weight,
         color: color,
@@ -237,7 +243,7 @@ class T {
         fontFeatures: features,
       );
 
-  /// Marker-style handwriting — used for large headings only (stays legible big).
+  /// Large headings in the selected font (kept big + bold for hierarchy).
   static TextStyle _hand({
     required double size,
     required FontWeight weight,
@@ -245,7 +251,8 @@ class T {
     double letterSpacing = 0,
     double? height,
   }) =>
-      GoogleFonts.caveat(
+      GoogleFonts.getFont(
+        AppFonts.family,
         fontSize: size,
         fontWeight: weight,
         color: color,
@@ -288,12 +295,19 @@ class T {
   static TextStyle sectionHeader({Color c = AppColors.textMuted}) =>
       _f(size: 11, weight: FontWeight.w700, color: c, letterSpacing: 1.2);
 
-  /// Tabular numerics — uses Plus Jakarta Sans with tabular figures (looks great
-  /// for currency).
+  /// Tabular numerics — pinned to a stable sans (Nunito) with tabular figures
+  /// so countdown timers and counters never jitter, independent of the
+  /// selected app font.
   static TextStyle num(double size, {Color color = AppColors.textPrimary,
       FontWeight weight = FontWeight.w800}) =>
-      _f(size: size, weight: weight, color: color, letterSpacing: -0.3,
-          features: [const FontFeature.tabularFigures()]);
+      GoogleFonts.getFont(
+        AppFonts.numeralFamily,
+        fontSize: size,
+        fontWeight: weight,
+        color: color,
+        letterSpacing: -0.3,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
 }
 
 class AppTheme {
@@ -309,7 +323,7 @@ class AppTheme {
         onSurface: AppColors.textPrimary,
         error: AppColors.danger,
       ),
-      textTheme: GoogleFonts.kalamTextTheme().apply(
+      textTheme: GoogleFonts.getTextTheme(AppFonts.family).apply(
         bodyColor: AppColors.textPrimary, displayColor: AppColors.textPrimary),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent, elevation: 0,

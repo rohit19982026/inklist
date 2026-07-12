@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_fonts.dart';
 import '../widgets/section_header.dart';
 import '../services/groq_service.dart';
 import '../services/alarm_scheduler_service.dart';
 import '../services/smart_reminder_service.dart';
 import '../models/todo_task.dart';
+import 'font_picker_screen.dart';
 
 /// InkList settings — AI, alarms, smart reminders, and (stubbed) Premium.
 /// All financial settings from the original app have been removed.
@@ -107,6 +109,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
+
+                  // ── Appearance ─────────────────────────────────────────────
+                  const SectionHeader(
+                    title: 'Appearance',
+                    subtitle: 'Choose the handwriting or font that fits you',
+                  ),
+                  _settingsGroup([
+                    _settingRow(
+                      icon: Icons.font_download_rounded,
+                      tint: AppColors.accent,
+                      title: 'Font',
+                      value:
+                          '${AppFonts.current().label} · ${AppFonts.current().handwritten ? 'Handwritten' : 'Clean'} — 21 to choose from',
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const FontPickerScreen()),
+                        );
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ]),
+
+                  const SizedBox(height: 24),
 
                   // ── AI Assistant (Groq) ────────────────────────────────────
                   SectionHeader(
