@@ -63,7 +63,8 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     _description = TextEditingController(text: t?.description ?? '');
     _dueDate = t?.dueDate ?? DateTime.now();
     _time = t?.alarmTime;
-    _alarmEnabled = t?.alarmEnabled ?? false;
+    // Alarm on by default for every new task (InkList's "don't forget" promise).
+    _alarmEnabled = t?.alarmEnabled ?? true;
     _priority = t?.priority ?? 'medium';
     _subtasks = List.of(t?.subtasks ?? const []);
     _subtaskControllers =
@@ -245,16 +246,20 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
       if (text.isNotEmpty) subtasks.add(_subtasks[i].copyWith(title: text));
     }
     final desc = _description.text.trim();
+    // Alarm-on-by-default: if the user left the alarm on but didn't pick a
+    // time, default to 9:00 AM so every task still gets a reminder.
+    final effectiveTime =
+        _time ?? (_alarmEnabled ? const TimeOfDayMs(hour: 9, minute: 0) : null);
     final task = TodoTask(
       id: widget.existing?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
       title: title,
       description: desc.isEmpty ? null : desc,
       dueDate: _dueDate,
-      alarmTime: _time,
+      alarmTime: effectiveTime,
       priority: _priority,
       isCompleted: widget.existing?.isCompleted ?? false,
       completedAt: widget.existing?.completedAt,
-      alarmEnabled: _alarmEnabled && _time != null,
+      alarmEnabled: _alarmEnabled && effectiveTime != null,
       recurrenceRule: _recurrenceRule,
       completedDates: widget.existing?.completedDates ?? const {},
       subtasks: subtasks,
