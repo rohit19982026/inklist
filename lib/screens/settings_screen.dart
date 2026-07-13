@@ -6,8 +6,10 @@ import '../services/groq_service.dart';
 import '../services/alarm_scheduler_service.dart';
 import '../services/smart_reminder_service.dart';
 import '../services/notification_permission_service.dart';
+import '../services/alarm_tone_service.dart';
 import '../models/todo_task.dart';
 import 'font_picker_screen.dart';
+import 'alarm_tone_picker_screen.dart';
 
 /// InkList settings — AI, alarms, smart reminders, and (stubbed) Premium.
 /// All financial settings from the original app have been removed.
@@ -28,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notificationsPermanentlyDenied = false;
   bool _smartRemindersEnabled = false;
   List<TimeOfDayMs> _smartReminderTimes = SmartReminderService.defaultTimes;
+  String _alarmToneTitle = 'Default';
 
   @override
   void initState() {
@@ -46,6 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       NotificationPermissionService.isPermanentlyDenied(),
       AlarmSchedulerService.canUseFullScreenIntent(),
       AlarmSchedulerService.isIgnoringBatteryOptimizations(),
+      AlarmToneService.getSelectedTitle(),
     ]);
     if (!mounted) return;
     setState(() {
@@ -58,6 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _notificationsPermanentlyDenied = r[6] as bool;
       _canUseFullScreenIntent = r[7] as bool;
       _ignoringBatteryOptimizations = r[8] as bool;
+      _alarmToneTitle = r[9] as String;
       _loading = false;
     });
   }
@@ -282,6 +287,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _load();
                         },
                       ),
+                    _settingRow(
+                      icon: Icons.music_note_rounded,
+                      tint: AppColors.accent,
+                      title: 'Alarm & Notification Tone',
+                      value: '$_alarmToneTitle · soothing, not a wake-up alarm',
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const AlarmTonePickerScreen()),
+                        );
+                        _load();
+                      },
+                    ),
                     _settingRow(
                       icon: Icons.do_not_disturb_on_rounded,
                       tint: AppColors.textMuted,

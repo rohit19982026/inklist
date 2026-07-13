@@ -7,6 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -366,21 +369,57 @@ class SmartReminderService : Service() {
     private fun postReview(title: String, message: String) =
         postNotification(title, message, REVIEW_NOTIFICATION_ID)
 
+    /**
+     * The same tone the user picked for task alarms (Settings → Alarm &
+     * Notification Tone — one setting covers both, per the feature request),
+     * falling back to the system's default notification sound when nothing's
+     * been picked yet.
+     */
+    private fun selectedToneUri(): Uri? {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val saved = prefs.getString("flutter.alarm_tone_uri", null)
+        if (!saved.isNullOrEmpty()) {
+            try { return Uri.parse(saved) } catch (_: Exception) {}
+        }
+        return RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+    }
+
+    /**
+     * A NotificationChannel's sound is immutable once created — the only way
+     * to change it after the fact is to delete and recreate the channel
+     * under the same ID, which is exactly what this does whenever the
+     * currently-registered sound no longer matches the user's selection.
+     */
+    private fun ensureChannelWithTone(
+        nm: NotificationManager, channelId: String, name: String, description: String,
+    ) {
+        val desiredSound = selectedToneUri()
+        val existing = nm.getNotificationChannel(channelId)
+        if (existing != null && existing.sound == desiredSound) return
+        if (existing != null) nm.deleteNotificationChannel(channelId)
+        val channel = NotificationChannel(
+            channelId, name, NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            this.description = description
+            setSound(
+                desiredSound,
+                AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build(),
+            )
+            enableLights(true)
+            lightColor = NotificationIcons.BRAND_COLOR
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 250, 150, 250)
+        }
+        nm.createNotificationChannel(channel)
+    }
+
     private fun postNotification(title: String, message: String, id: Int) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (nm.getNotificationChannel(REMINDER_CHANNEL_ID) == null) {
-                val channel = NotificationChannel(
-                    REMINDER_CHANNEL_ID, "Smart Reminders", NotificationManager.IMPORTANCE_DEFAULT
-                ).apply {
-                    description = "Daily plan reviews and check-ins about tasks that need attention"
-                    enableLights(true)
-                    lightColor = NotificationIcons.BRAND_COLOR
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 250, 150, 250)
-                }
-                nm.createNotificationChannel(channel)
-            }
+            ensureChannelWithTone(
+                nm, REMINDER_CHANNEL_ID, "Smart Reminders",
+                "Daily plan reviews and check-ins about tasks that need attention",
+            )
         }
         val tapIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP

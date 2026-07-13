@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.CountDownTimer
 import android.os.IBinder
@@ -157,9 +158,25 @@ class AlarmRingingService : Service() {
         stopRinging()
     }
 
+    /**
+     * The user's chosen tone (Settings → Alarm & Notification Tone), or —
+     * when nothing's been picked yet — the system's default *notification*
+     * sound rather than the default *alarm* sound. The stock alarm sound is
+     * deliberately loud/jarring by design; this is meant to be a soothing
+     * to-do reminder, not a wake-up alarm.
+     */
+    private fun selectedToneUri(): Uri? {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val saved = prefs.getString("flutter.alarm_tone_uri", null)
+        if (!saved.isNullOrEmpty()) {
+            try { return Uri.parse(saved) } catch (_: Exception) {}
+        }
+        return RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+    }
+
     private fun startRinging() {
-        val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val alarmUri = selectedToneUri()
         mediaPlayer = MediaPlayer().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
@@ -169,6 +186,7 @@ class AlarmRingingService : Service() {
             )
             isLooping = true
             try {
+                if (alarmUri == null) throw IllegalStateException("No tone URI available")
                 setDataSource(this@AlarmRingingService, alarmUri)
                 prepare()
                 start()

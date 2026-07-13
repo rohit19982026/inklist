@@ -157,8 +157,36 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
 
+                    // ── Alarm/notification tone picker ───────────────────────
+                    "listAlarmTones" -> {
+                        result.success(AlarmToneHelper.listTones(this))
+                    }
+
+                    "previewTone" -> {
+                        val uri = call.argument<String>("uri")
+                        if (uri.isNullOrEmpty()) {
+                            result.success(null)
+                        } else {
+                            AlarmToneHelper.preview(this, uri)
+                            result.success(null)
+                        }
+                    }
+
+                    "stopTonePreview" -> {
+                        AlarmToneHelper.stopPreview()
+                        result.success(null)
+                    }
+
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // Safety net: a tone preview started from the picker screen shouldn't
+    // keep playing if the user backs out of the app without explicitly
+    // stopping it (e.g. the Dart screen's dispose() call gets skipped).
+    override fun onPause() {
+        super.onPause()
+        AlarmToneHelper.stopPreview()
     }
 }
