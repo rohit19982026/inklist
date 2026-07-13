@@ -179,8 +179,9 @@ class GroqService {
       return const GroqResult.fail('No tasks to summarize');
     }
     const system = 'You are a terse daily-focus assistant. Given today\'s '
-        'and overdue tasks (a JSON list with title/priority/overdue) and, '
-        'when present, a "behavior" object summarizing the user\'s actual '
+        'and overdue tasks (a JSON list with title/priority/overdue, plus '
+        'daysOverdue for anything overdue) and, when present, a "behavior" '
+        'object summarizing the user\'s actual '
         'completion patterns over the last ~2 weeks (completion rates by '
         'weekday/priority, recurring tasks that keep getting missed, habit '
         'streaks, focus-session activity), write 1-3 short bullet points '
@@ -193,15 +194,16 @@ class GroqService {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final payload = jsonEncode({
-      'tasks': todayAndOverdue
-          .map((t) => {
-                'title': t.title,
-                'priority': t.priority,
-                'overdue': !t.isRecurring &&
-                    DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day)
-                        .isBefore(today),
-              })
-          .toList(),
+      'tasks': todayAndOverdue.map((t) {
+        final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+        final overdue = !t.isRecurring && !t.isCompleted && due.isBefore(today);
+        return {
+          'title': t.title,
+          'priority': t.priority,
+          'overdue': overdue,
+          if (overdue) 'daysOverdue': today.difference(due).inDays,
+        };
+      }).toList(),
       if (behaviorContext != null && behaviorContext.isNotEmpty)
         'behavior': behaviorContext,
     });

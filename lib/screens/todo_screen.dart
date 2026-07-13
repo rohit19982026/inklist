@@ -591,6 +591,7 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
   // ── Task card ───────────────────────────────────────────────────────────────
   Widget _taskCard(TodoTask t, DateTime forDay, {required Color accent, int index = 0}) {
     final done = t.isCompletedOn(forDay);
+    final overdueDays = done ? 0 : TodoService.daysOverdue(t, asOf: forDay);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Dismissible(
@@ -629,9 +630,10 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
                             fontWeight: FontWeight.w700,
                             decoration: done ? TextDecoration.lineThrough : null,
                             color: done ? AppColors.textMuted : AppColors.textPrimary)),
-                    if (_hasMeta(t)) ...[
+                    if (_hasMeta(t) || overdueDays > 0) ...[
                       const SizedBox(height: 8),
                       Wrap(spacing: 6, runSpacing: 6, children: [
+                        if (overdueDays > 0) _overdueChip(overdueDays),
                         if (t.alarmTime != null)
                           _metaChip(
                             TimeOfDay(hour: t.alarmTime!.hour, minute: t.alarmTime!.minute)
@@ -684,6 +686,22 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
         Text(label,
             style: T.footnote(c: AppColors.textSecondary)
                 .copyWith(fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+
+  Widget _overdueChip(int days) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(Radii.pill),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.history_toggle_off_rounded, size: 13, color: AppColors.danger),
+        const SizedBox(width: 5),
+        Text(days == 1 ? '1 day late' : '$days days late',
+            style: T.footnote(c: AppColors.danger).copyWith(fontWeight: FontWeight.w700)),
       ]),
     );
   }

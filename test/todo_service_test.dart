@@ -115,6 +115,34 @@ void main() {
           reason: 'recurring tasks have no overdue concept');
     });
 
+    test('daysOverdue counts whole days since the due date for a stale task', () {
+      final asOf = DateTime(2026, 3, 10);
+      final task = fixture.firstWhere((t) => t.id == 'one-off-past');
+      expect(TodoService.daysOverdue(task, asOf: asOf), 5);
+    });
+
+    test('daysOverdue is 0 for completed, recurring, or not-yet-due tasks', () {
+      final asOf = DateTime(2026, 3, 10);
+      expect(
+        TodoService.daysOverdue(
+            fixture.firstWhere((t) => t.id == 'one-off-past-done'),
+            asOf: asOf),
+        0,
+      );
+      expect(
+        TodoService.daysOverdue(
+            fixture.firstWhere((t) => t.id == 'daily-recurring'),
+            asOf: asOf),
+        0,
+      );
+      expect(
+        TodoService.daysOverdue(
+            fixture.firstWhere((t) => t.id == 'one-off-today'),
+            asOf: asOf),
+        0,
+      );
+    });
+
     test('startOfWeek returns the Monday of the given date\'s week', () {
       final wed = DateTime(2026, 3, 11); // Wednesday
       final start = TodoService.startOfWeek(wed);

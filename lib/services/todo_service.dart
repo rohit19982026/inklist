@@ -101,6 +101,18 @@ class TodoService {
     }).toList();
   }
 
+  /// Whole days between [t]'s due date and [asOf] (today by default) — how
+  /// long it's been sitting in the Overdue backlog. 0 if not actually
+  /// overdue (recurring, already completed, or due today/future).
+  static int daysOverdue(TodoTask t, {DateTime? asOf}) {
+    if (t.isRecurring || t.isCompleted) return 0;
+    final now = asOf ?? DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+    final delta = today.difference(due).inDays;
+    return delta > 0 ? delta : 0;
+  }
+
   static Future<({List<TodoTask> today, List<TodoTask> overdue})>
       todayAndOverdue() async {
     final all = await getAll();
