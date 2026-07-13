@@ -14,6 +14,8 @@ import '../services/pomodoro_service.dart';
 import '../services/todo_service.dart';
 import '../services/ai_feedback_service.dart';
 import '../services/duplicate_task_service.dart';
+import '../services/user_routine_service.dart';
+import '../models/user_routine.dart';
 
 /// Create / edit a to-do task. Forked from GoalEditorSheet's structure —
 /// same drag-handle/sheet-decoration/pill-row idioms.
@@ -286,6 +288,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
 
     final tasks = await TodoService.getAll();
     final occupied = _sameDayOccupiedTimes(tasks);
+    final routine = await UserRoutineService.getRoutine();
 
     if (await GroqService.isConfigured) {
       final habits = await HabitService.getAll();
@@ -307,6 +310,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
             .map((t) =>
                 '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}')
             .toList(),
+        routineContext: routine.toPromptContext(),
       );
       // Re-check _time: the user may have picked one manually while this
       // was in flight.
@@ -323,7 +327,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
 
     if (!mounted || _time != null) return;
     setState(() {
-      _time = _defaultAlarmTime(occupied: occupied);
+      _time = _defaultAlarmTime(occupied: occupied, routine: routine);
       _timeIsDefaultSuggested = true;
     });
   }
@@ -403,28 +407,52 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
   /// Local, non-AI fallback time — either when the user enables the alarm
   /// but picks no time, or (see [_maybeSuggestAlarmTime]) whenever AI isn't
   /// configured/available and a task still needs *some* time filled in.
-  /// Prefers 9:00 AM, but for a task due *today* whose 9 AM has already
-  /// passed it rolls forward to the next top-of-hour so the alarm still has a
-  /// future moment to fire (instead of silently landing in the past), then
-  /// nudges away from [occupied] times so it doesn't land on top of another
-  /// task's scheduled time.
-  TimeOfDayMs _defaultAlarmTime({List<TimeOfDayMs> occupied = const []}) {
+  /// Prefers [routine]'s wake time when set (else 9:00 AM), but for a task
+  /// due *today* whose base time has already passed it rolls forward to the
+  /// next top-of-hour so the alarm still has a future moment to fire
+  /// (instead of silently landing in the past). Then nudges away from the
+  /// user's sleep window and from [occupied] times so it doesn't land on
+  /// top of another task's scheduled time or land while they're asleep.
+  TimeOfDayMs _defaultAlarmTime({
+    List<TimeOfDayMs> occupied = const [],
+    UserRoutine? routine,
+  }) {
     final now = DateTime.now();
     final isToday = _dueDate.year == now.year &&
         _dueDate.month == now.month &&
         _dueDate.day == now.day;
-    final nineAm = DateTime(_dueDate.year, _dueDate.month, _dueDate.day, 9, 0);
+    final base = routine?.wakeTime ?? const TimeOfDayMs(hour: 9, minute: 0);
+    final baseDt =
+        DateTime(_dueDate.year, _dueDate.month, _dueDate.day, base.hour, base.minute);
     TimeOfDayMs candidate;
-    if (!isToday || nineAm.isAfter(now)) {
-      candidate = const TimeOfDayMs(hour: 9, minute: 0);
+    if (!isToday || baseDt.isAfter(now)) {
+      candidate = base;
     } else {
-      // Today, past 9 AM → next top-of-hour, if one still exists before midnight.
+      // Today, past the base time → next top-of-hour, if one still exists
+      // before midnight.
       final nextHour = now.hour + 1;
       candidate = nextHour <= 23
           ? TimeOfDayMs(hour: nextHour, minute: 0)
-          : const TimeOfDayMs(hour: 9, minute: 0); // late-night edge, best effort
+          : base; // late-night edge, best effort
     }
+    candidate = _avoidSleepWindow(candidate, routine);
     return _avoidConflicts(candidate, occupied);
+  }
+
+  /// Nudges [t] to [routine]'s wake time if it falls inside their sleep
+  /// window (sleepTime to wakeTime, wrapping past midnight — the normal
+  /// case). No-op if either isn't set.
+  TimeOfDayMs _avoidSleepWindow(TimeOfDayMs t, UserRoutine? routine) {
+    final sleep = routine?.sleepTime;
+    final wake = routine?.wakeTime;
+    if (sleep == null || wake == null) return t;
+    final minutes = t.hour * 60 + t.minute;
+    final sleepMinutes = sleep.hour * 60 + sleep.minute;
+    final wakeMinutes = wake.hour * 60 + wake.minute;
+    final inSleepWindow = sleepMinutes <= wakeMinutes
+        ? (minutes >= sleepMinutes && minutes < wakeMinutes)
+        : (minutes >= sleepMinutes || minutes < wakeMinutes);
+    return inSleepWindow ? wake : t;
   }
 
   /// Steps [start] forward in 30-minute increments until it's at least 30

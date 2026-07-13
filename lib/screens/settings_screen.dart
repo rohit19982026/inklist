@@ -13,7 +13,9 @@ import '../services/google_calendar_service.dart';
 import '../services/mcp_bridge_service.dart';
 import '../services/pomodoro_service.dart';
 import '../services/reminder_schedule_advisor.dart';
+import '../services/user_routine_service.dart';
 import '../models/todo_task.dart';
+import '../models/user_routine.dart';
 import 'font_picker_screen.dart';
 import 'alarm_tone_picker_screen.dart';
 
@@ -37,6 +39,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _smartRemindersEnabled = false;
   List<TimeOfDayMs> _smartReminderTimes = SmartReminderService.defaultTimes;
   List<TimeOfDayMs>? _suggestedCheckInTimes;
+  TimeOfDayMs? _wakeTime;
+  TimeOfDayMs? _sleepTime;
+  TimeOfDayMs? _workStart;
+  TimeOfDayMs? _workEnd;
   String _alarmToneTitle = 'Default';
   bool _calendarSyncEnabled = false;
   bool _calendarSignedIn = false;
@@ -82,9 +88,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ]);
     final sessions = await PomodoroService.getSessions();
     final suggestedTimes = ReminderScheduleAdvisor.suggestCheckInTimes(sessions);
+    final routine = await UserRoutineService.getRoutine();
     if (!mounted) return;
     setState(() {
       _suggestedCheckInTimes = suggestedTimes;
+      _wakeTime = routine.wakeTime;
+      _sleepTime = routine.sleepTime;
+      _workStart = routine.workStart;
+      _workEnd = routine.workEnd;
       _aiEnabled = r[0] as bool;
       _groqApiKey = r[1] as String?;
       _canScheduleExactAlarms = r[2] as bool;
@@ -324,6 +335,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: 'Test Connection',
                       value: 'Send a test request to Groq',
                       onTap: _testGroqConnection,
+                    ),
+                  ]),
+
+                  const SizedBox(height: 24),
+
+                  // ── Your Routine (feeds AI/default time suggestions) ────────
+                  SectionHeader(
+                    title: 'Your Routine',
+                    subtitle: (_wakeTime == null &&
+                            _sleepTime == null &&
+                            _workStart == null &&
+                            _workEnd == null)
+                        ? 'Not set — task times default to generic guesses'
+                        : 'Used so suggested task times respect your day',
+                  ),
+                  _settingsGroup([
+                    _settingRow(
+                      icon: Icons.wb_sunny_rounded,
+                      tint: AppColors.amber,
+                      title: 'Wake-up time',
+                      value: _wakeTime != null
+                          ? TimeOfDay(hour: _wakeTime!.hour, minute: _wakeTime!.minute)
+                              .format(context)
+                          : 'Not set — tap to add',
+                      onTap: () => _pickRoutineTime(
+                        current: _wakeTime,
+                        onPicked: (t) =>
+                            _updateRoutine((r) => r.copyWith(wakeTime: t)),
+                      ),
+                    ),
+                    _settingRow(
+                      icon: Icons.bedtime_rounded,
+                      tint: AppColors.accent,
+                      title: 'Sleep time',
+                      value: _sleepTime != null
+                          ? TimeOfDay(hour: _sleepTime!.hour, minute: _sleepTime!.minute)
+                              .format(context)
+                          : 'Not set — tap to add',
+                      onTap: () => _pickRoutineTime(
+                        current: _sleepTime,
+                        onPicked: (t) =>
+                            _updateRoutine((r) => r.copyWith(sleepTime: t)),
+                      ),
+                    ),
+                    _settingRow(
+                      icon: Icons.work_rounded,
+                      tint: AppColors.primary,
+                      title: 'Work starts',
+                      value: _workStart != null
+                          ? TimeOfDay(hour: _workStart!.hour, minute: _workStart!.minute)
+                              .format(context)
+                          : 'Not set — tap to add',
+                      onTap: () => _pickRoutineTime(
+                        current: _workStart,
+                        onPicked: (t) =>
+                            _updateRoutine((r) => r.copyWith(workStart: t)),
+                      ),
+                    ),
+                    _settingRow(
+                      icon: Icons.work_off_rounded,
+                      tint: AppColors.textMuted,
+                      title: 'Work ends',
+                      value: _workEnd != null
+                          ? TimeOfDay(hour: _workEnd!.hour, minute: _workEnd!.minute)
+                              .format(context)
+                          : 'Not set — tap to add',
+                      onTap: () => _pickRoutineTime(
+                        current: _workEnd,
+                        onPicked: (t) =>
+                            _updateRoutine((r) => r.copyWith(workEnd: t)),
+                      ),
                     ),
                   ]),
 
@@ -754,6 +836,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _toast(result.isSuccess
         ? 'Connected to Groq ✓'
         : (result.error ?? 'Connection failed'));
+  }
+
+  // ── Your Routine ─────────────────────────────────────────────────────────
+  /// Opens a time picker seeded with [current], then hands the picked value
+  /// to [onPicked]. Used by every row in the "Your Routine" section.
+  Future<void> _pickRoutineTime({
+    required TimeOfDayMs? current,
+    required Future<void> Function(TimeOfDayMs picked) onPicked,
+  }) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: current != null
+          ? TimeOfDay(hour: current.hour, minute: current.minute)
+          : const TimeOfDay(hour: 9, minute: 0),
+    );
+    if (picked == null) return;
+    await onPicked(TimeOfDayMs(hour: picked.hour, minute: picked.minute));
+  }
+
+  Future<void> _updateRoutine(
+      UserRoutine Function(UserRoutine current) update) async {
+    final current = await UserRoutineService.getRoutine();
+    final updated = update(current);
+    await UserRoutineService.setRoutine(updated);
+    if (!mounted) return;
+    setState(() {
+      _wakeTime = updated.wakeTime;
+      _sleepTime = updated.sleepTime;
+      _workStart = updated.workStart;
+      _workEnd = updated.workEnd;
+    });
   }
 
   // ── Smart Reminders dialog ─────────────────────────────────────────────────

@@ -428,6 +428,7 @@ class GroqService {
     Map<String, dynamic>? behaviorContext,
     Map<String, dynamic>? feedbackContext,
     List<String>? occupiedTimes,
+    Map<String, dynamic>? routineContext,
   }) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
@@ -451,8 +452,16 @@ class GroqService {
         'also include "occupiedTimes" — a list of "HH:MM" times already '
         'taken by other tasks due the same day. Avoid landing within 30 '
         'minutes of any of those, picking the nearest sensible free slot '
-        'instead, unless the task title makes an exact time unavoidable. '
-        'Respond ONLY with JSON: {"hour": 0-23, "minute": 0-59}.';
+        'instead, unless the task title makes an exact time unavoidable. It '
+        'may also include a "routine" object with the user\'s actual '
+        'wakeTime/sleepTime/workStart/workEnd ("HH:MM" strings, any subset '
+        'may be present) — NEVER suggest a time inside their sleep window '
+        '(sleepTime to wakeTime, wrapping past midnight) unless the title '
+        'explicitly asks for it (e.g. "set an alarm for 5am"); prefer '
+        'workStart-workEnd for work-sounding tasks (meetings, calls, '
+        'reports, deadlines) when the title doesn\'t already imply a '
+        'specific time. Respond ONLY with JSON: {"hour": 0-23, "minute": '
+        '0-59}.';
     final payload = jsonEncode({
       'title': title,
       if (description != null && description.isNotEmpty)
@@ -466,6 +475,8 @@ class GroqService {
         'feedback': feedbackContext,
       if (occupiedTimes != null && occupiedTimes.isNotEmpty)
         'occupiedTimes': occupiedTimes,
+      if (routineContext != null && routineContext.isNotEmpty)
+        'routine': routineContext,
     });
     final resp = await _post(key, [
       {'role': 'system', 'content': system},
