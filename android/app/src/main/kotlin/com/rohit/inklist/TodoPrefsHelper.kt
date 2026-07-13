@@ -75,6 +75,18 @@ object TodoPrefsHelper {
         writeTasks(context, tasks)
     }
 
+    /** The task's priority ("low"/"medium"/"high"), or "medium" if the task
+     * can't be found — used by SmartSnoozeHelper to pick a base snooze
+     * length without needing priority threaded through the alarm intent. */
+    fun readPriority(context: Context, taskId: String): String {
+        val tasks = readTasks(context)
+        for (i in 0 until tasks.length()) {
+            val obj = tasks.optJSONObject(i) ?: continue
+            if (obj.optString("id") == taskId) return obj.optString("priority", "medium")
+        }
+        return "medium"
+    }
+
     /** Every task with alarmEnabled == true and a specific alarm time set —
      * used by BootReceiver to re-register alarms after a reboot. */
     fun readAlarmEnabledTasks(context: Context): List<AlarmTaskInfo> {

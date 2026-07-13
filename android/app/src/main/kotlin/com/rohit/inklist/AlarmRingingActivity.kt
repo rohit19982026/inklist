@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
@@ -27,6 +28,10 @@ class AlarmRingingActivity : Activity() {
 
     private var taskId: String = ""
     private var title: String = "Task"
+    // Guards against onKeyDown's auto-repeat (a held volume key fires this
+    // repeatedly) or a double tap re-entering dismiss()/snooze() before the
+    // activity has actually finished.
+    private var handled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,12 +86,18 @@ class AlarmRingingActivity : Activity() {
         }
 
         val snoozeButton = Button(this).apply {
-            text = "Snooze 10 min"
-            setOnClickListener { snooze() }
+            text = "Snooze"
+            setOnClickListener {
+                isEnabled = false
+                snooze()
+            }
         }
         val dismissButton = Button(this).apply {
             text = "Dismiss"
-            setOnClickListener { dismiss() }
+            setOnClickListener {
+                isEnabled = false
+                dismiss()
+            }
         }
 
         root.addView(timeText)
@@ -100,18 +111,38 @@ class AlarmRingingActivity : Activity() {
         return root
     }
 
+    /**
+     * Volume buttons silence the alarm immediately, same as Dismiss — this
+     * is meant to be a soothing to-do reminder, not something that fights
+     * the user for control of their phone. Consumed (returns true) so the
+     * system volume itself doesn't also change underneath the dismiss.
+     */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            dismiss()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     private fun snooze() {
-        stopRingingService()
+        if (handled) return
+        handled = true
+        val priority = TodoPrefsHelper.readPriority(applicationContext, taskId)
+        val minutes = SmartSnoozeHelper.nextSnoozeMinutes(applicationContext, taskId, priority)
         val requestCode = taskId.hashCode() + AlarmSchedulerHelper.SNOOZE_OFFSET
-        val triggerAt = System.currentTimeMillis() + 10 * 60 * 1000L
+        val triggerAt = System.currentTimeMillis() + minutes * 60 * 1000L
         AlarmSchedulerHelper.schedule(this, requestCode, taskId, title, triggerAt, "none")
-        finish()
+        stopRingingService()
+        finishAndRemoveTask()
     }
 
     private fun dismiss() {
+        if (handled) return
+        handled = true
         markOccurrenceDone()
         stopRingingService()
-        finish()
+        finishAndRemoveTask()
     }
 
     private fun markOccurrenceDone() {
@@ -122,7 +153,16 @@ class AlarmRingingActivity : Activity() {
         }
     }
 
+    /**
+     * Stops AlarmRingingService two ways: a direct stopService() call (a
+     * synchronous request through ActivityManager) and the ACTION_STOP
+     * broadcast. The broadcast alone can race or simply never arrive if the
+     * receiver hasn't finished registering yet, which is what made Dismiss
+     * feel unreliable — stopService() doesn't depend on that at all, so this
+     * is a guaranteed teardown with the broadcast as a redundant backstop.
+     */
     private fun stopRingingService() {
+        stopService(Intent(this, AlarmRingingService::class.java))
         sendBroadcast(Intent(AlarmRingingService.ACTION_STOP))
     }
 }

@@ -42,11 +42,20 @@ class AlarmRingingService : Service() {
         val EXTRA_TASK_ID = AlarmSchedulerHelper.EXTRA_TASK_ID
         val EXTRA_TITLE = AlarmSchedulerHelper.EXTRA_TITLE
         private const val SAFETY_TIMEOUT_MS = 5 * 60 * 1000L
+
+        // Ring at full volume just long enough to be noticed, then fade down
+        // to a gentler sustained level — a soothing to-do reminder shouldn't
+        // keep blasting at full volume for the whole 5-minute safety window.
+        private const val FULL_VOLUME_DURATION_MS = 3_000L
+        private const val FADE_DURATION_MS = 4_000L
+        private const val FADE_TICK_MS = 200L
+        private const val SUSTAINED_VOLUME = 0.35f
     }
 
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
     private var safetyTimer: CountDownTimer? = null
+    private var volumeRampTimer: CountDownTimer? = null
     private var receiverRegistered = false
 
     private val stopReceiver = object : BroadcastReceiver() {
@@ -143,8 +152,10 @@ class AlarmRingingService : Service() {
     }
 
     private fun snoozeFromNotification(taskId: String, title: String) {
+        val priority = TodoPrefsHelper.readPriority(applicationContext, taskId)
+        val minutes = SmartSnoozeHelper.nextSnoozeMinutes(applicationContext, taskId, priority)
         val requestCode = taskId.hashCode() + AlarmSchedulerHelper.SNOOZE_OFFSET
-        val triggerAt = System.currentTimeMillis() + 10 * 60 * 1000L
+        val triggerAt = System.currentTimeMillis() + minutes * 60 * 1000L
         AlarmSchedulerHelper.schedule(this, requestCode, taskId, title, triggerAt, "none")
         stopRinging()
     }
@@ -190,6 +201,7 @@ class AlarmRingingService : Service() {
                 setDataSource(this@AlarmRingingService, alarmUri)
                 prepare()
                 start()
+                startVolumeFade()
             } catch (_: Exception) {
                 // No alarm sound available on this device — vibration still runs.
             }
@@ -205,8 +217,38 @@ class AlarmRingingService : Service() {
         }
     }
 
+    /**
+     * Rings at full volume for [FULL_VOLUME_DURATION_MS] so it's noticed,
+     * then eases down to [SUSTAINED_VOLUME] over [FADE_DURATION_MS] — two
+     * chained CountDownTimers rather than one, since the "hold, then ramp"
+     * shape isn't a single linear interpolation.
+     */
+    private fun startVolumeFade() {
+        volumeRampTimer?.cancel()
+        volumeRampTimer = object : CountDownTimer(FULL_VOLUME_DURATION_MS, FULL_VOLUME_DURATION_MS) {
+            override fun onTick(millisUntilFinished: Long) {}
+            override fun onFinish() {
+                volumeRampTimer = object : CountDownTimer(FADE_DURATION_MS, FADE_TICK_MS) {
+                    override fun onTick(millisUntilFinished: Long) {
+                        val progress = 1f - (millisUntilFinished.toFloat() / FADE_DURATION_MS)
+                        val volume = 1f - progress * (1f - SUSTAINED_VOLUME)
+                        setPlayerVolumeSafely(volume)
+                    }
+                    override fun onFinish() {
+                        setPlayerVolumeSafely(SUSTAINED_VOLUME)
+                    }
+                }.start()
+            }
+        }.start()
+    }
+
+    private fun setPlayerVolumeSafely(volume: Float) {
+        try { mediaPlayer?.setVolume(volume, volume) } catch (_: Exception) {}
+    }
+
     private fun stopRinging() {
         safetyTimer?.cancel()
+        volumeRampTimer?.cancel()
         mediaPlayer?.let {
             try { if (it.isPlaying) it.stop() } catch (_: Exception) {}
             it.release()
@@ -249,7 +291,7 @@ class AlarmRingingService : Service() {
             .setOngoing(true)
             .setFullScreenIntent(contentPending, true)
             .setContentIntent(contentPending)
-            .addAction(R.drawable.ic_stat_snooze, "Snooze 10 min", snoozePending)
+            .addAction(R.drawable.ic_stat_snooze, "Snooze", snoozePending)
             .addAction(R.drawable.ic_stat_dismiss, "Dismiss", dismissPending)
             .build()
     }
