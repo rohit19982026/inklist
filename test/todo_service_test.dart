@@ -151,6 +151,52 @@ void main() {
     });
   });
 
+  group('TodoService.sortedBacklog / backlogScore', () {
+    test('a fresh high-priority task outranks a fresh medium or low one', () {
+      final asOf = DateTime(2026, 3, 10);
+      final high = TodoTask(
+        id: 'high', title: 'High', priority: 'high',
+        dueDate: DateTime(2026, 3, 9), createdAt: DateTime(2026, 3, 1));
+      final medium = TodoTask(
+        id: 'medium', title: 'Medium', priority: 'medium',
+        dueDate: DateTime(2026, 3, 9), createdAt: DateTime(2026, 3, 1));
+      final low = TodoTask(
+        id: 'low', title: 'Low', priority: 'low',
+        dueDate: DateTime(2026, 3, 9), createdAt: DateTime(2026, 3, 1));
+      final sorted = TodoService.sortedBacklog([low, high, medium], asOf: asOf);
+      expect(sorted.map((t) => t.id).toList(), ['high', 'medium', 'low']);
+    });
+
+    test('a long-neglected medium-priority task can outrank a just-added high one', () {
+      final asOf = DateTime(2026, 3, 31);
+      final staleMedium = TodoTask(
+        id: 'stale-medium', title: 'Stale medium', priority: 'medium',
+        dueDate: DateTime(2026, 3, 1), createdAt: DateTime(2026, 3, 1));
+      final freshHigh = TodoTask(
+        id: 'fresh-high', title: 'Fresh high', priority: 'high',
+        dueDate: DateTime(2026, 3, 30), createdAt: DateTime(2026, 3, 30));
+      final sorted =
+          TodoService.sortedBacklog([freshHigh, staleMedium], asOf: asOf);
+      expect(sorted.first.id, 'stale-medium',
+          reason: '30 days overdue should out-climb a task overdue by 1 day, '
+              'even across a priority tier');
+    });
+
+    test('staleness bonus is capped at 30 days so ancient tasks don\'t dominate forever', () {
+      final asOf = DateTime(2026, 6, 1);
+      final task60DaysLate = TodoTask(
+        id: 'ancient', title: 'Ancient', priority: 'low',
+        dueDate: DateTime(2026, 4, 1), createdAt: DateTime(2026, 4, 1));
+      final task30DaysLate = TodoTask(
+        id: 'month-late', title: 'Month late', priority: 'low',
+        dueDate: DateTime(2026, 5, 2), createdAt: DateTime(2026, 5, 2));
+      expect(
+        TodoService.backlogScore(task60DaysLate, asOf: asOf),
+        TodoService.backlogScore(task30DaysLate, asOf: asOf),
+      );
+    });
+  });
+
   group('TodoTask JSON round-trip', () {
     test('round-trips all fields including subtasks and completedDates', () {
       final original = TodoTask(

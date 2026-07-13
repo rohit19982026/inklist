@@ -22,7 +22,7 @@ import 'weekly_plan_preview_screen.dart';
 import 'settings_screen.dart';
 
 /// InkList "Today" — a handwritten daily planner. Tasks are grouped into
-/// priority buckets (Overdue → Top Priorities → Must Do → If I Have Time),
+/// priority buckets (Backlog → Top Priorities → Must Do → If I Have Time),
 /// with a schedule strip for anything that has a time, a progress sheet, and
 /// the AI daily-focus note on top.
 class TodoScreen extends StatefulWidget {
@@ -202,7 +202,8 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
       );
     }
     final now = DateTime.now();
-    final overdue = TodoService.overdueTasks(_all, asOf: now);
+    final overdue = TodoService.sortedBacklog(
+        TodoService.overdueTasks(_all, asOf: now), asOf: now);
     final today = TodoService.tasksForDay(_all, now);
     final done = today.where((t) => t.isCompletedOn(now)).length;
 
@@ -256,8 +257,9 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
               if (nothingAtAll)
                 SliverToBoxAdapter(child: _emptyState())
               else ...[
-                ..._bucket('Overdue', overdue, now,
-                    AppColors.hlPeach, AppColors.danger, Icons.error_outline_rounded),
+                ..._bucket('Backlog', overdue, now,
+                    AppColors.hlPeach, AppColors.danger, Icons.layers_rounded,
+                    stacked: true),
                 ..._bucket('Top Priorities', high, now,
                     AppColors.hlPink, AppColors.danger, Icons.star_rounded),
                 ..._bucket('Must Do Today', medium, now,
@@ -562,25 +564,43 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
 
   // ── Priority bucket ─────────────────────────────────────────────────────────
   List<Widget> _bucket(String title, List<TodoTask> tasks, DateTime forDay,
-      Color hl, Color accent, IconData icon) {
+      Color hl, Color accent, IconData icon, {bool stacked = false}) {
     if (tasks.isEmpty) return const [];
     return [
       SliverPadding(
         padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
         sliver: SliverToBoxAdapter(
-          child: Row(children: [
-            HighlighterLabel(title, color: hl, icon: icon),
-            const SizedBox(width: 8),
-            Text('${tasks.length}',
-                style: T.body(c: AppColors.textMuted).copyWith(fontWeight: FontWeight.w700)),
-          ]),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                HighlighterLabel(title, color: hl, icon: icon),
+                const SizedBox(width: 8),
+                Text('${tasks.length}',
+                    style: T.body(c: AppColors.textMuted)
+                        .copyWith(fontWeight: FontWeight.w700)),
+              ]),
+              if (stacked) ...[
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.only(left: 2),
+                  child: Text('Stacked by urgency — priority + how long it\'s waited',
+                      style: T.footnote(c: AppColors.textMuted)),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
       SliverPadding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
         sliver: SliverList(
           delegate: SliverChildBuilderDelegate(
-            (ctx, i) => _taskCard(tasks[i], forDay, accent: accent, index: i),
+            (ctx, i) => _taskCard(tasks[i], forDay,
+                accent: accent,
+                index: i,
+                stacked: stacked,
+                rank: stacked ? i : null),
             childCount: tasks.length,
           ),
         ),
@@ -589,28 +609,35 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
   }
 
   // ── Task card ───────────────────────────────────────────────────────────────
-  Widget _taskCard(TodoTask t, DateTime forDay, {required Color accent, int index = 0}) {
+  Widget _taskCard(TodoTask t, DateTime forDay,
+      {required Color accent, int index = 0, bool stacked = false, int? rank}) {
     final done = t.isCompletedOn(forDay);
     final overdueDays = done ? 0 : TodoService.daysOverdue(t, asOf: forDay);
+    final tilt = stacked && !done ? (index.isEven ? 0.012 : -0.014) : 0.0;
+    final showRank = stacked && !done && rank != null && rank < 3;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Dismissible(
-        key: ValueKey('${t.id}_${forDay.millisecondsSinceEpoch}'),
-        direction: DismissDirection.endToStart,
-        background: Container(
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 22),
-          decoration: BoxDecoration(
-            color: AppColors.danger,
-            borderRadius: BorderRadius.circular(Radii.xl),
-          ),
-          child: const Icon(Icons.delete_rounded, color: Colors.white),
-        ),
-        onDismissed: (_) => _delete(t),
-        child: PaperCard(
-          padding: const EdgeInsets.all(14),
-          onTap: () => _edit(t),
-          child: Row(
+      padding: EdgeInsets.only(bottom: 10, top: showRank ? 6 : 0),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Dismissible(
+            key: ValueKey('${t.id}_${forDay.millisecondsSinceEpoch}'),
+            direction: DismissDirection.endToStart,
+            background: Container(
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 22),
+              decoration: BoxDecoration(
+                color: AppColors.danger,
+                borderRadius: BorderRadius.circular(Radii.xl),
+              ),
+              child: const Icon(Icons.delete_rounded, color: Colors.white),
+            ),
+            onDismissed: (_) => _delete(t),
+            child: PaperCard(
+              padding: const EdgeInsets.all(14),
+              tilt: tilt,
+              onTap: () => _edit(t),
+              child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
@@ -660,12 +687,37 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
               ),
             ],
           ),
-        ),
+            ),
+          ),
+          if (showRank) Positioned(top: -6, left: 16, child: _rankBadge(rank)),
+        ],
       ),
     )
         .animate()
         .fadeIn(duration: 260.ms, delay: (40 * index).ms)
         .slideY(begin: 0.06, end: 0, curve: Curves.easeOut);
+  }
+
+  Widget _rankBadge(int rank) {
+    final color = switch (rank) {
+      0 => AppColors.danger,
+      1 => AppColors.warning,
+      _ => AppColors.textSecondary,
+    };
+    return Container(
+      width: 24,
+      height: 24,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: AppColors.bg, width: 2.5),
+        boxShadow: AppColors.softShadow,
+      ),
+      child: Text('${rank + 1}',
+          style: T.footnote(c: Colors.white)
+              .copyWith(fontWeight: FontWeight.w800, fontSize: 11)),
+    );
   }
 
   bool _hasMeta(TodoTask t) =>

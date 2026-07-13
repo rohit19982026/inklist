@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/todo_task.dart';
 import 'recurrence_rule.dart';
@@ -111,6 +112,32 @@ class TodoService {
     final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
     final delta = today.difference(due).inDays;
     return delta > 0 ? delta : 0;
+  }
+
+  static const Map<String, double> _backlogPriorityWeight = {
+    'high': 100, 'medium': 60, 'low': 20,
+  };
+
+  /// How urgently [t] deserves to sit near the top of the backlog stack.
+  /// Priority is the primary signal (a fresh high-priority task normally
+  /// outranks a fresh low one), but staleness is weighted in too — a
+  /// medium/low task neglected for weeks can still out-climb a
+  /// just-added high-priority one, capped at 30 days so year-old tasks
+  /// don't dominate forever. Local/deterministic by design (same "must be
+  /// instant, no network round-trip" rule as duplicate detection and
+  /// check-in-time suggestion) since sorting a list should never wait on AI.
+  static double backlogScore(TodoTask t, {DateTime? asOf}) {
+    final base = _backlogPriorityWeight[t.priority] ?? 60;
+    final staleness = math.min(daysOverdue(t, asOf: asOf), 30) * 2;
+    return base + staleness;
+  }
+
+  /// [overdue] (as returned by [overdueTasks]) ranked highest-urgency first.
+  static List<TodoTask> sortedBacklog(List<TodoTask> overdue, {DateTime? asOf}) {
+    final ranked = [...overdue];
+    ranked.sort((a, b) =>
+        backlogScore(b, asOf: asOf).compareTo(backlogScore(a, asOf: asOf)));
+    return ranked;
   }
 
   static Future<({List<TodoTask> today, List<TodoTask> overdue})>
