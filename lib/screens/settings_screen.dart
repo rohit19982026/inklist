@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_fonts.dart';
 import '../widgets/section_header.dart';
@@ -8,6 +9,7 @@ import '../services/smart_reminder_service.dart';
 import '../services/notification_permission_service.dart';
 import '../services/alarm_tone_service.dart';
 import '../services/google_calendar_service.dart';
+import '../services/mcp_bridge_service.dart';
 import '../models/todo_task.dart';
 import 'font_picker_screen.dart';
 import 'alarm_tone_picker_screen.dart';
@@ -35,6 +37,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _calendarSyncEnabled = false;
   bool _calendarSignedIn = false;
   String? _calendarEmail;
+  bool _mcpBridgeEnabled = false;
+  String? _mcpBridgeAddress;
+  String _mcpBridgeToken = '';
 
   @override
   void initState() {
@@ -57,6 +62,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       GoogleCalendarService.isSyncEnabled(),
       GoogleCalendarService.isSignedIn(),
       GoogleCalendarService.signedInEmail(),
+      MCPBridgeService.isEnabled(),
+      MCPBridgeService.localAddress(),
+      MCPBridgeService.getToken(),
     ]);
     if (!mounted) return;
     setState(() {
@@ -73,8 +81,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _calendarSyncEnabled = r[10] as bool;
       _calendarSignedIn = r[11] as bool;
       _calendarEmail = r[12] as String?;
+      _mcpBridgeEnabled = r[13] as bool;
+      _mcpBridgeAddress = r[14] as String?;
+      _mcpBridgeToken = r[15] as String;
       _loading = false;
     });
+  }
+
+  Future<void> _toggleMcpBridge(bool v) async {
+    setState(() => _mcpBridgeEnabled = v);
+    await MCPBridgeService.setEnabled(v);
+    _load();
+  }
+
+  Future<void> _regenerateMcpToken() async {
+    await MCPBridgeService.regenerateToken();
+    _load();
+    _toast('New token generated — update it in your MCP server config');
+  }
+
+  Future<void> _copyMcpToken() async {
+    await Clipboard.setData(ClipboardData(text: _mcpBridgeToken));
+    _toast('Token copied');
+  }
+
+  Future<void> _copyMcpAddress() async {
+    final address = _mcpBridgeAddress;
+    if (address == null) return;
+    await Clipboard.setData(
+        ClipboardData(text: 'http://$address:${MCPBridgeService.port}'));
+    _toast('Address copied');
   }
 
   Future<void> _toggleCalendarSync(bool v) async {
@@ -459,6 +495,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             : _connectCalendar,
                       ),
                     ]),
+
+                  const SizedBox(height: 24),
+
+                  // ── Claude Connector (local MCP bridge) ─────────────────
+                  SectionHeader(
+                    title: 'Claude Connector',
+                    subtitle: _mcpBridgeEnabled
+                        ? (MCPBridgeService.isRunning
+                            ? 'Running · reachable on your Wi-Fi'
+                            : 'On, but not reachable right now')
+                        : 'Off',
+                  ),
+                  _settingsGroup([
+                    _settingRow(
+                      icon: Icons.hub_rounded,
+                      tint: AppColors.accent,
+                      title: 'Enable Local API for Claude',
+                      value: _mcpBridgeEnabled
+                          ? 'On · only while InkList is open, same Wi-Fi only'
+                          : 'Lets Claude Desktop/Code read and manage tasks over your Wi-Fi',
+                      trailing: Switch.adaptive(
+                        value: _mcpBridgeEnabled,
+                        activeThumbColor: AppColors.accent,
+                        onChanged: _toggleMcpBridge,
+                      ),
+                    ),
+                    if (_mcpBridgeEnabled) ...[
+                      _settingRow(
+                        icon: Icons.wifi_rounded,
+                        tint: AppColors.primary,
+                        title: 'Address',
+                        value: _mcpBridgeAddress != null
+                            ? 'http://$_mcpBridgeAddress:${MCPBridgeService.port} · tap to copy'
+                            : 'No Wi-Fi connection detected',
+                        onTap: _mcpBridgeAddress != null ? _copyMcpAddress : null,
+                      ),
+                      _settingRow(
+                        icon: Icons.key_rounded,
+                        tint: AppColors.primary,
+                        title: 'Token',
+                        value:
+                            '${_mcpBridgeToken.substring(0, _mcpBridgeToken.length.clamp(0, 8))}••••••• · tap to copy',
+                        onTap: _copyMcpToken,
+                      ),
+                      _settingRow(
+                        icon: Icons.refresh_rounded,
+                        tint: AppColors.textMuted,
+                        title: 'Regenerate Token',
+                        value:
+                            'Invalidates the old token — update your MCP server config after',
+                        onTap: _regenerateMcpToken,
+                      ),
+                    ],
+                  ]),
 
                   const SizedBox(height: 32),
                   Center(child: Text('InkList', style: T.caption1())),

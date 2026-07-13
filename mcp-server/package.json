@@ -1,0 +1,16 @@
+{
+  "name": "inklist-mcp-server",
+  "version": "1.0.0",
+  "description": "Local MCP server that lets Claude Desktop/Claude Code read and manage InkList tasks over the same Wi-Fi network as the phone running the app.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  }
+}
