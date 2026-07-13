@@ -246,18 +246,35 @@ class AlarmRingingService : Service() {
         try { mediaPlayer?.setVolume(volume, volume) } catch (_: Exception) {}
     }
 
+    /**
+     * Every step here is independently guarded. Previously mediaPlayer's
+     * release() call sat outside its own try/catch, so if it (or anything
+     * else) threw, stopForeground()/stopSelf() below it never ran -- the
+     * exact bug behind "Dismiss doesn't turn the alarm off": sound might
+     * stop, but the foreground notification and service would silently
+     * survive. stopForeground/stopSelf must always execute regardless of
+     * what else fails.
+     */
     private fun stopRinging() {
-        safetyTimer?.cancel()
-        volumeRampTimer?.cancel()
-        mediaPlayer?.let {
-            try { if (it.isPlaying) it.stop() } catch (_: Exception) {}
-            it.release()
-        }
+        try { safetyTimer?.cancel() } catch (_: Exception) {}
+        try { volumeRampTimer?.cancel() } catch (_: Exception) {}
+        try {
+            mediaPlayer?.let {
+                try { if (it.isPlaying) it.stop() } catch (_: Exception) {}
+                try { it.release() } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
         mediaPlayer = null
-        vibrator?.cancel()
-        @Suppress("DEPRECATION")
-        stopForeground(true)
-        stopSelf()
+        try { vibrator?.cancel() } catch (_: Exception) {}
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Exception) {}
+        try { stopSelf() } catch (_: Exception) {}
     }
 
     /**
