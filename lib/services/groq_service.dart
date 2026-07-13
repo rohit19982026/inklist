@@ -299,6 +299,52 @@ class GroqService {
     return parseHabitSuggestions(resp.data!);
   }
 
+  /// AI-suggested alarm time for a task the user hasn't picked a time for.
+  /// Purely an enhancement in front of the app's own fallback (see
+  /// TodoEditorSheet._defaultAlarmTime) — never blocks task creation, and a
+  /// manual time pick always overrides whatever this suggests.
+  static Future<GroqResult<TimeOfDayMs>> suggestAlarmTime({
+    required String title,
+    String? description,
+    required String priority,
+    required DateTime dueDate,
+    required String recurrenceRule,
+    Map<String, dynamic>? behaviorContext,
+  }) async {
+    final key = await getApiKey();
+    if (key == null || key.isEmpty) {
+      return const GroqResult.fail(
+          'Add your Groq API key in Settings to use AI features');
+    }
+    const system = 'Suggest a single good time of day for a reminder alarm '
+        'for this task, based on what it likely involves — e.g. "Morning '
+        'run" implies early morning, "Read before bed" implies evening, '
+        '"Team meeting" implies typical business hours. If nothing about '
+        'the task implies a time, default to a reasonable mid-morning time '
+        '(e.g. 9:00-10:00). The user message may include a "behavior" '
+        'object with the user\'s actual completion patterns (completion '
+        'rates by weekday, habit streaks) — use it as a secondary signal '
+        'only when relevant, never override an obvious semantic cue from '
+        'the title. Respond ONLY with JSON: {"hour": 0-23, "minute": '
+        '0-59}.';
+    final payload = jsonEncode({
+      'title': title,
+      if (description != null && description.isNotEmpty)
+        'description': description,
+      'priority': priority,
+      'dueWeekday': _weekdayName(dueDate.weekday),
+      'recurrence': recurrenceRule,
+      if (behaviorContext != null && behaviorContext.isNotEmpty)
+        'behavior': behaviorContext,
+    });
+    final resp = await _post(key, [
+      {'role': 'system', 'content': system},
+      {'role': 'user', 'content': payload},
+    ], jsonMode: true, maxTokens: 60);
+    if (!resp.isSuccess) return GroqResult.fail(resp.error);
+    return parseAlarmTimeResponse(resp.data!);
+  }
+
   // ── Pure parse functions (unit-testable, no network) ────────────────────
 
   static GroqResult<WeeklyPlanDraft> parseWeeklyPlanResponse(String rawContent) {
@@ -378,6 +424,21 @@ class GroqService {
     } catch (_) {
       return const GroqResult.fail(
           'Groq returned an unexpected response — try again or add manually');
+    }
+  }
+
+  static GroqResult<TimeOfDayMs> parseAlarmTimeResponse(String rawContent) {
+    try {
+      final j = jsonDecode(rawContent) as Map<String, dynamic>;
+      final hour = (j['hour'] as num?)?.toInt();
+      if (hour == null || hour < 0 || hour > 23) {
+        return const GroqResult.fail('Groq returned an invalid time');
+      }
+      final minute = ((j['minute'] as num?)?.toInt() ?? 0).clamp(0, 59);
+      return GroqResult.ok(TimeOfDayMs(hour: hour, minute: minute));
+    } catch (_) {
+      return const GroqResult.fail(
+          'Groq returned an unexpected response — try again or pick a time');
     }
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -7,11 +8,13 @@ import '../services/recurrence_rule.dart';
 import '../services/groq_service.dart';
 import '../services/alarm_scheduler_service.dart';
 import '../services/notification_permission_service.dart';
+import '../services/behavior_insights_service.dart';
+import '../services/habit_service.dart';
+import '../services/pomodoro_service.dart';
+import '../services/todo_service.dart';
 
 /// Create / edit a to-do task. Forked from GoalEditorSheet's structure —
-/// same drag-handle/sheet-decoration/pill-row idioms. The alarm toggle is
-/// intentionally not shown yet (native scheduling lands in a later
-/// milestone); the time picker below is purely informational until then.
+/// same drag-handle/sheet-decoration/pill-row idioms.
 class TodoEditorSheet extends StatefulWidget {
   final TodoTask? existing;
   final DateTime? initialDate;
@@ -59,6 +62,8 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
   late List<TodoSubtask> _subtasks;
   bool _breakingDown = false;
   bool _alarmEnabled = false;
+  bool _timeIsAiSuggested = false;
+  Timer? _aiSuggestDebounce;
 
   @override
   void initState() {
@@ -89,10 +94,16 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
       _recurrenceKind = 'monthly';
       _monthlyLast = rule.substring(8) == 'last';
     }
+
+    // Covers editing an existing task that already has the alarm on with no
+    // time set — new tasks get their first chance via the title field's
+    // onChanged (see _maybeSuggestAlarmTime).
+    _maybeSuggestAlarmTime();
   }
 
   @override
   void dispose() {
+    _aiSuggestDebounce?.cancel();
     _title.dispose();
     _description.dispose();
     for (final c in _subtaskControllers) {
@@ -123,7 +134,10 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
           : TimeOfDay.now(),
     );
     if (picked != null) {
-      setState(() => _time = TimeOfDayMs(hour: picked.hour, minute: picked.minute));
+      setState(() {
+        _time = TimeOfDayMs(hour: picked.hour, minute: picked.minute);
+        _timeIsAiSuggested = false;
+      });
     }
   }
 
@@ -133,6 +147,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
       return;
     }
     setState(() => _alarmEnabled = true);
+    _maybeSuggestAlarmTime();
     // The alarm's ringing screen is delivered via a full-screen notification
     // — without POST_NOTIFICATIONS granted, the OS drops it silently, so this
     // is just as load-bearing as the exact-alarm permission checked below.
@@ -235,6 +250,45 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     }
   }
 
+  /// AI-suggested alarm time, offered automatically when the alarm is on
+  /// but no time is set yet — purely an enhancement in front of
+  /// [_defaultAlarmTime] below, which still runs at save time if this never
+  /// resolves (no AI configured, network failure, or the response was
+  /// invalid). A manual time pick always overrides this — every call site
+  /// that sets `_time` directly also clears [_timeIsAiSuggested].
+  Future<void> _maybeSuggestAlarmTime() async {
+    if (_time != null || !_alarmEnabled) return;
+    final title = _title.text.trim();
+    if (title.isEmpty) return;
+    if (!await GroqService.isConfigured) return;
+
+    final tasks = await TodoService.getAll();
+    final habits = await HabitService.getAll();
+    final sessions = await PomodoroService.getSessions();
+    final behaviorContext = BehaviorInsightsService.summarize(
+      tasks: tasks, habits: habits, sessions: sessions,
+    );
+
+    final desc = _description.text.trim();
+    final result = await GroqService.suggestAlarmTime(
+      title: title,
+      description: desc.isEmpty ? null : desc,
+      priority: _priority,
+      dueDate: _dueDate,
+      recurrenceRule: _recurrenceRule,
+      behaviorContext: behaviorContext,
+    );
+    // Re-check _time: the user may have picked one manually while this was
+    // in flight, or turned the alarm back off.
+    if (!mounted || _time != null || !_alarmEnabled || !result.isSuccess) {
+      return;
+    }
+    setState(() {
+      _time = result.data;
+      _timeIsAiSuggested = true;
+    });
+  }
+
   /// Default alarm time when the user enables the alarm but picks no time.
   /// Prefers 9:00 AM, but for a task due *today* whose 9 AM has already
   /// passed it rolls forward to the next top-of-hour so the alarm still has a
@@ -333,7 +387,12 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                 textCapitalization: TextCapitalization.sentences,
                 style: T.body().copyWith(fontWeight: FontWeight.w600),
                 decoration: _dec('e.g. Pay electricity bill'),
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) {
+                  setState(() {});
+                  _aiSuggestDebounce?.cancel();
+                  _aiSuggestDebounce = Timer(
+                      const Duration(milliseconds: 800), _maybeSuggestAlarmTime);
+                },
               )),
               const SizedBox(height: 14),
 
@@ -406,6 +465,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                         onTap: () => setState(() {
                           _time = null;
                           _alarmEnabled = false;
+                          _timeIsAiSuggested = false;
                         }),
                         child: const Icon(Icons.close_rounded,
                             size: 16, color: AppColors.textMuted),
@@ -414,6 +474,16 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                   ]),
                 ),
               ),
+              if (_timeIsAiSuggested) ...[
+                const SizedBox(height: 4),
+                Row(children: [
+                  const Icon(Icons.auto_awesome_rounded,
+                      size: 12, color: AppColors.accent),
+                  const SizedBox(width: 4),
+                  Text('AI suggested — tap to change',
+                      style: T.caption2(c: AppColors.accent)),
+                ]),
+              ],
               if (_time != null) ...[
                 const SizedBox(height: 8),
                 Row(children: [

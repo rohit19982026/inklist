@@ -186,4 +186,45 @@ void main() {
       expect(result.isSuccess, isFalse);
     });
   });
+
+  group('parseAlarmTimeResponse', () {
+    test('parses a valid hour and minute', () {
+      const raw = '{"hour": 7, "minute": 30}';
+      final result = GroqService.parseAlarmTimeResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data!.hour, 7);
+      expect(result.data!.minute, 30);
+    });
+
+    test('defaults minute to 0 when absent', () {
+      const raw = '{"hour": 18}';
+      final result = GroqService.parseAlarmTimeResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data!.minute, 0);
+    });
+
+    test('clamps an out-of-range minute instead of failing', () {
+      const raw = '{"hour": 9, "minute": 90}';
+      final result = GroqService.parseAlarmTimeResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data!.minute, 59);
+    });
+
+    test('rejects an out-of-range hour', () {
+      const raw = '{"hour": 25, "minute": 0}';
+      final result = GroqService.parseAlarmTimeResponse(raw);
+      expect(result.isSuccess, isFalse);
+    });
+
+    test('rejects a missing hour', () {
+      const raw = '{"minute": 30}';
+      final result = GroqService.parseAlarmTimeResponse(raw);
+      expect(result.isSuccess, isFalse);
+    });
+
+    test('malformed JSON degrades to a fail rather than throwing', () {
+      final result = GroqService.parseAlarmTimeResponse('not json {{');
+      expect(result.isSuccess, isFalse);
+    });
+  });
 }
