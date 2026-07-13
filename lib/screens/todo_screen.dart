@@ -11,6 +11,8 @@ import '../services/alarm_scheduler_service.dart';
 import '../services/behavior_insights_service.dart';
 import '../services/habit_service.dart';
 import '../services/pomodoro_service.dart';
+import '../services/google_calendar_service.dart';
+import '../models/calendar_event.dart';
 import '../widgets/todo_editor_sheet.dart';
 import '../widgets/nl_quick_add_sheet.dart';
 import '../widgets/ink_widgets.dart';
@@ -34,6 +36,7 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
   String? _brief;
   bool _briefLoading = false;
   bool _aiConfigured = false;
+  List<CalendarEvent> _calendarEvents = const [];
 
   @override
   void initState() {
@@ -63,13 +66,28 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
     final all = await TodoService.getAll();
     final configured = await GroqService.isConfigured;
     final cachedBrief = configured ? await GroqService.getCachedDailyBrief() : null;
+    final events = await _loadTodayCalendarEvents();
     if (!mounted) return;
     setState(() {
       _all = all;
       _aiConfigured = configured;
       _brief = cachedBrief;
+      _calendarEvents = events;
       _loading = false;
     });
+  }
+
+  /// Empty list unless the user has both enabled and signed in to Calendar
+  /// sync — never blocks the rest of Today from loading (see
+  /// GoogleCalendarService's graceful-degradation contract).
+  Future<List<CalendarEvent>> _loadTodayCalendarEvents() async {
+    if (!GoogleCalendarService.isConfigured) return const [];
+    if (!await GoogleCalendarService.isSyncEnabled()) return const [];
+    if (!await GoogleCalendarService.isSignedIn()) return const [];
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day);
+    final end = start.add(const Duration(days: 1));
+    return GoogleCalendarService.fetchEventsForRange(start, end);
   }
 
   Future<void> _refreshDailyBrief() async {
@@ -186,6 +204,11 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                   sliver: SliverToBoxAdapter(child: _scheduleSheet(timed, now)),
+                ),
+              if (_calendarEvents.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                  sliver: SliverToBoxAdapter(child: _calendarSheet()),
                 ),
               if (nothingAtAll)
                 SliverToBoxAdapter(child: _emptyState())
@@ -418,6 +441,43 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
                             color: done ? AppColors.textMuted : AppColors.textPrimary)),
                   ),
                 ),
+              ]),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ── Google Calendar events (read-only import) ───────────────────────────────
+  Widget _calendarSheet() {
+    return PaperCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const HighlighterLabel('From your calendar',
+              color: AppColors.hlLavender, icon: Icons.event_rounded),
+          const SizedBox(height: 12),
+          ..._calendarEvents.map((e) {
+            final timeLabel = e.allDay
+                ? 'All day'
+                : TimeOfDay.fromDateTime(e.start).format(context);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                SizedBox(
+                  width: 66,
+                  child: Text(timeLabel,
+                      style: T.footnote(c: AppColors.textSecondary)
+                          .copyWith(fontWeight: FontWeight.w700)),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 2, right: 10),
+                  child: Icon(Icons.event_rounded,
+                      size: 14, color: AppColors.accent),
+                ),
+                Expanded(child: Text(e.title, style: T.body())),
               ]),
             );
           }),

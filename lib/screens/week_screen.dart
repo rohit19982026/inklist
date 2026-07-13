@@ -7,6 +7,8 @@ import '../models/todo_task.dart';
 import '../services/todo_service.dart';
 import '../services/data_sync.dart';
 import '../services/alarm_scheduler_service.dart';
+import '../services/google_calendar_service.dart';
+import '../models/calendar_event.dart';
 import '../widgets/todo_editor_sheet.dart';
 import '../widgets/ink_widgets.dart';
 import '../widgets/alarm_feedback.dart';
@@ -25,6 +27,7 @@ class WeekScreen extends StatefulWidget {
 class _WeekScreenState extends State<WeekScreen> with WidgetsBindingObserver {
   bool _loading = true;
   List<TodoTask> _all = const [];
+  List<CalendarEvent> _calendarEvents = const [];
   late DateTime _weekStart; // Monday of the shown week
 
   // Highlighter colour per weekday, so the grid reads like a colourful planner.
@@ -68,12 +71,33 @@ class _WeekScreenState extends State<WeekScreen> with WidgetsBindingObserver {
 
   Future<void> _load() async {
     final all = await TodoService.getAll();
+    final events = await _loadWeekCalendarEvents();
     if (!mounted) return;
     setState(() {
       _all = all;
+      _calendarEvents = events;
       _loading = false;
     });
   }
+
+  /// Empty list unless Calendar sync is both enabled and signed in — never
+  /// blocks the rest of Week from loading.
+  Future<List<CalendarEvent>> _loadWeekCalendarEvents() async {
+    if (!GoogleCalendarService.isConfigured) return const [];
+    if (!await GoogleCalendarService.isSyncEnabled()) return const [];
+    if (!await GoogleCalendarService.isSignedIn()) return const [];
+    final end = _weekStart.add(const Duration(days: 7));
+    return GoogleCalendarService.fetchEventsForRange(_weekStart, end);
+  }
+
+  void _reloadCalendarEventsForCurrentWeek() {
+    _loadWeekCalendarEvents().then((events) {
+      if (mounted) setState(() => _calendarEvents = events);
+    });
+  }
+
+  List<CalendarEvent> _eventsForDay(DateTime day) =>
+      _calendarEvents.where((e) => _isSameDay(e.start, day)).toList();
 
   Future<void> _persist(TodoTask t) async {
     await TodoService.upsert(t);
@@ -106,11 +130,13 @@ class _WeekScreenState extends State<WeekScreen> with WidgetsBindingObserver {
   void _shiftWeek(int weeks) {
     HapticFeedback.selectionClick();
     setState(() => _weekStart = _weekStart.add(Duration(days: 7 * weeks)));
+    _reloadCalendarEventsForCurrentWeek();
   }
 
   void _goToThisWeek() {
     HapticFeedback.selectionClick();
     setState(() => _weekStart = TodoService.startOfWeek(DateTime.now()));
+    _reloadCalendarEventsForCurrentWeek();
   }
 
   bool _isSameDay(DateTime a, DateTime b) =>
@@ -291,6 +317,7 @@ class _WeekScreenState extends State<WeekScreen> with WidgetsBindingObserver {
         return (at.hour * 60 + at.minute).compareTo(bt.hour * 60 + bt.minute);
       });
     final doneCount = tasks.where((t) => t.isCompletedOn(day)).length;
+    final events = _eventsForDay(day);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -344,8 +371,39 @@ class _WeekScreenState extends State<WeekScreen> with WidgetsBindingObserver {
               const SizedBox(height: 8),
               for (final t in tasks) _taskRow(t, day),
             ],
+            for (final e in events) _calendarEventRow(e),
           ],
         ),
+      ),
+    );
+  }
+
+  // Read-only — InkList never writes to the user's Google Calendar.
+  Widget _calendarEventRow(CalendarEvent e) {
+    final timeLabel =
+        e.allDay ? 'All day' : TimeOfDay.fromDateTime(e.start).format(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.event_rounded, size: 18, color: AppColors.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(e.title, style: T.body(c: AppColors.textSecondary)),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(timeLabel,
+                      style: T.caption2(c: AppColors.textMuted)
+                          .copyWith(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

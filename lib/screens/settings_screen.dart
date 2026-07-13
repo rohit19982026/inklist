@@ -7,6 +7,7 @@ import '../services/alarm_scheduler_service.dart';
 import '../services/smart_reminder_service.dart';
 import '../services/notification_permission_service.dart';
 import '../services/alarm_tone_service.dart';
+import '../services/google_calendar_service.dart';
 import '../models/todo_task.dart';
 import 'font_picker_screen.dart';
 import 'alarm_tone_picker_screen.dart';
@@ -31,6 +32,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _smartRemindersEnabled = false;
   List<TimeOfDayMs> _smartReminderTimes = SmartReminderService.defaultTimes;
   String _alarmToneTitle = 'Default';
+  bool _calendarSyncEnabled = false;
+  bool _calendarSignedIn = false;
+  String? _calendarEmail;
 
   @override
   void initState() {
@@ -50,6 +54,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AlarmSchedulerService.canUseFullScreenIntent(),
       AlarmSchedulerService.isIgnoringBatteryOptimizations(),
       AlarmToneService.getSelectedTitle(),
+      GoogleCalendarService.isSyncEnabled(),
+      GoogleCalendarService.isSignedIn(),
+      GoogleCalendarService.signedInEmail(),
     ]);
     if (!mounted) return;
     setState(() {
@@ -63,8 +70,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _canUseFullScreenIntent = r[7] as bool;
       _ignoringBatteryOptimizations = r[8] as bool;
       _alarmToneTitle = r[9] as String;
+      _calendarSyncEnabled = r[10] as bool;
+      _calendarSignedIn = r[11] as bool;
+      _calendarEmail = r[12] as String?;
       _loading = false;
     });
+  }
+
+  Future<void> _toggleCalendarSync(bool v) async {
+    await GoogleCalendarService.setSyncEnabled(v);
+    if (v && !_calendarSignedIn) {
+      final ok = await GoogleCalendarService.signIn();
+      if (!ok) await GoogleCalendarService.setSyncEnabled(false);
+    }
+    _load();
+  }
+
+  Future<void> _connectCalendar() async {
+    final ok = await GoogleCalendarService.signIn();
+    if (ok) await GoogleCalendarService.setSyncEnabled(true);
+    _load();
+  }
+
+  Future<void> _disconnectCalendar() async {
+    await GoogleCalendarService.setSyncEnabled(false);
+    await GoogleCalendarService.signOut();
+    _load();
   }
 
   Future<void> _fixNotificationPermission() async {
@@ -350,6 +381,84 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: _editSmartReminderTimes,
                     ),
                   ]),
+
+                  const SizedBox(height: 24),
+
+                  // ── Calendar ─────────────────────────────────────────────
+                  SectionHeader(
+                    title: 'Calendar',
+                    subtitle: !GoogleCalendarService.isConfigured
+                        ? 'Needs setup'
+                        : _calendarSignedIn
+                            ? 'Connected as ${_calendarEmail ?? ''}'
+                            : 'Not connected',
+                  ),
+                  if (!GoogleCalendarService.isConfigured)
+                    _settingsGroup([
+                      _settingRow(
+                        icon: Icons.event_busy_rounded,
+                        tint: AppColors.textMuted,
+                        title: 'Google Calendar',
+                        value:
+                            'This build hasn\'t been configured for Calendar sync yet — ask your developer to finish the Google Cloud Console setup.',
+                        onTap: () => showDialog<void>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            backgroundColor: AppColors.card,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(Radii.lg)),
+                            title: const Text('Calendar sync isn\'t set up yet'),
+                            content: Text(
+                              'Showing Google Calendar events in InkList needs a '
+                              'one-time Google Cloud Console setup that only the '
+                              'developer can do (an OAuth client tied to this '
+                              'app). Once that\'s done, this section will let you '
+                              'connect your account.',
+                              style: T.footnote(),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('OK'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ])
+                  else
+                    _settingsGroup([
+                      _settingRow(
+                        icon: Icons.event_available_rounded,
+                        tint: AppColors.accent,
+                        title: 'Show Google Calendar Events',
+                        value: _calendarSyncEnabled
+                            ? 'On · shown alongside your tasks in Today and Week'
+                            : 'Off',
+                        trailing: Switch.adaptive(
+                          value: _calendarSyncEnabled,
+                          activeThumbColor: AppColors.accent,
+                          onChanged: _toggleCalendarSync,
+                        ),
+                      ),
+                      _settingRow(
+                        icon: _calendarSignedIn
+                            ? Icons.check_circle_rounded
+                            : Icons.login_rounded,
+                        tint: _calendarSignedIn
+                            ? AppColors.success
+                            : AppColors.primary,
+                        title: _calendarSignedIn
+                            ? 'Disconnect Google Account'
+                            : 'Connect Google Account',
+                        value: _calendarSignedIn
+                            ? _calendarEmail ?? 'Connected'
+                            : 'Read-only — InkList never edits your calendar',
+                        onTap: _calendarSignedIn
+                            ? _disconnectCalendar
+                            : _connectCalendar,
+                      ),
+                    ]),
 
                   const SizedBox(height: 32),
                   Center(child: Text('InkList', style: T.caption1())),
