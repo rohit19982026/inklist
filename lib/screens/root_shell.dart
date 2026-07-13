@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../config/feature_flags.dart';
 import '../theme/app_theme.dart';
 import '../services/smart_reminder_service.dart';
 import '../services/notification_permission_service.dart';
@@ -35,7 +36,11 @@ class _RootShellState extends State<RootShell> {
       await SmartReminderService.syncSchedule();
       // Resumes the Claude connector bridge if it was left on — off by
       // default, so this is a no-op for anyone who hasn't enabled it.
-      if (await MCPBridgeService.isEnabled()) await MCPBridgeService.start();
+      // Gated off entirely while kEnableMcpConnector is false (see
+      // lib/config/feature_flags.dart).
+      if (kEnableMcpConnector && await MCPBridgeService.isEnabled()) {
+        await MCPBridgeService.start();
+      }
     });
   }
 

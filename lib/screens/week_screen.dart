@@ -9,6 +9,7 @@ import '../services/data_sync.dart';
 import '../services/alarm_scheduler_service.dart';
 import '../services/google_calendar_service.dart';
 import '../models/calendar_event.dart';
+import '../config/feature_flags.dart';
 import '../widgets/todo_editor_sheet.dart';
 import '../widgets/ink_widgets.dart';
 import '../widgets/alarm_feedback.dart';
@@ -83,6 +84,7 @@ class _WeekScreenState extends State<WeekScreen> with WidgetsBindingObserver {
   /// Empty list unless Calendar sync is both enabled and signed in — never
   /// blocks the rest of Week from loading.
   Future<List<CalendarEvent>> _loadWeekCalendarEvents() async {
+    if (!kEnableGoogleCalendar) return const [];
     if (!GoogleCalendarService.isConfigured) return const [];
     if (!await GoogleCalendarService.isSyncEnabled()) return const [];
     if (!await GoogleCalendarService.isSignedIn()) return const [];

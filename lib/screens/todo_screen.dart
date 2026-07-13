@@ -13,6 +13,7 @@ import '../services/habit_service.dart';
 import '../services/pomodoro_service.dart';
 import '../services/google_calendar_service.dart';
 import '../models/calendar_event.dart';
+import '../config/feature_flags.dart';
 import '../widgets/todo_editor_sheet.dart';
 import '../widgets/nl_quick_add_sheet.dart';
 import '../widgets/ink_widgets.dart';
@@ -81,6 +82,7 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
   /// sync — never blocks the rest of Today from loading (see
   /// GoogleCalendarService's graceful-degradation contract).
   Future<List<CalendarEvent>> _loadTodayCalendarEvents() async {
+    if (!kEnableGoogleCalendar) return const [];
     if (!GoogleCalendarService.isConfigured) return const [];
     if (!await GoogleCalendarService.isSyncEnabled()) return const [];
     if (!await GoogleCalendarService.isSignedIn()) return const [];

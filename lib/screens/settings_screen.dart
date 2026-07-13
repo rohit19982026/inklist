@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../config/feature_flags.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_fonts.dart';
 import '../widgets/section_header.dart';
@@ -59,12 +60,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AlarmSchedulerService.canUseFullScreenIntent(),
       AlarmSchedulerService.isIgnoringBatteryOptimizations(),
       AlarmToneService.getSelectedTitle(),
-      GoogleCalendarService.isSyncEnabled(),
-      GoogleCalendarService.isSignedIn(),
-      GoogleCalendarService.signedInEmail(),
-      MCPBridgeService.isEnabled(),
-      MCPBridgeService.localAddress(),
-      MCPBridgeService.getToken(),
+      kEnableGoogleCalendar
+          ? GoogleCalendarService.isSyncEnabled()
+          : Future.value(false),
+      kEnableGoogleCalendar
+          ? GoogleCalendarService.isSignedIn()
+          : Future.value(false),
+      kEnableGoogleCalendar
+          ? GoogleCalendarService.signedInEmail()
+          : Future.value(null),
+      kEnableMcpConnector
+          ? MCPBridgeService.isEnabled()
+          : Future.value(false),
+      kEnableMcpConnector
+          ? MCPBridgeService.localAddress()
+          : Future.value(null),
+      kEnableMcpConnector ? MCPBridgeService.getToken() : Future.value(''),
     ]);
     if (!mounted) return;
     setState(() {
@@ -418,137 +429,144 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ]),
 
-                  const SizedBox(height: 24),
-
-                  // ── Calendar ─────────────────────────────────────────────
-                  SectionHeader(
-                    title: 'Calendar',
-                    subtitle: !GoogleCalendarService.isConfigured
-                        ? 'Needs setup'
-                        : _calendarSignedIn
-                            ? 'Connected as ${_calendarEmail ?? ''}'
-                            : 'Not connected',
-                  ),
-                  if (!GoogleCalendarService.isConfigured)
-                    _settingsGroup([
-                      _settingRow(
-                        icon: Icons.event_busy_rounded,
-                        tint: AppColors.textMuted,
-                        title: 'Google Calendar',
-                        value:
-                            'This build hasn\'t been configured for Calendar sync yet — ask your developer to finish the Google Cloud Console setup.',
-                        onTap: () => showDialog<void>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            backgroundColor: AppColors.card,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(Radii.lg)),
-                            title: const Text('Calendar sync isn\'t set up yet'),
-                            content: Text(
-                              'Showing Google Calendar events in InkList needs a '
-                              'one-time Google Cloud Console setup that only the '
-                              'developer can do (an OAuth client tied to this '
-                              'app). Once that\'s done, this section will let you '
-                              'connect your account.',
-                              style: T.footnote(),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                child: const Text('OK'),
+                  // ── Calendar (kept in the repo, off in shipped builds —
+                  // see lib/config/feature_flags.dart) ────────────────────
+                  if (kEnableGoogleCalendar) ...[
+                    const SizedBox(height: 24),
+                    SectionHeader(
+                      title: 'Calendar',
+                      subtitle: !GoogleCalendarService.isConfigured
+                          ? 'Needs setup'
+                          : _calendarSignedIn
+                              ? 'Connected as ${_calendarEmail ?? ''}'
+                              : 'Not connected',
+                    ),
+                    if (!GoogleCalendarService.isConfigured)
+                      _settingsGroup([
+                        _settingRow(
+                          icon: Icons.event_busy_rounded,
+                          tint: AppColors.textMuted,
+                          title: 'Google Calendar',
+                          value:
+                              'This build hasn\'t been configured for Calendar sync yet — ask your developer to finish the Google Cloud Console setup.',
+                          onTap: () => showDialog<void>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              backgroundColor: AppColors.card,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(Radii.lg)),
+                              title:
+                                  const Text('Calendar sync isn\'t set up yet'),
+                              content: Text(
+                                'Showing Google Calendar events in InkList needs a '
+                                'one-time Google Cloud Console setup that only the '
+                                'developer can do (an OAuth client tied to this '
+                                'app). Once that\'s done, this section will let you '
+                                'connect your account.',
+                                style: T.footnote(),
                               ),
-                            ],
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  child: const Text('OK'),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ])
-                  else
+                      ])
+                    else
+                      _settingsGroup([
+                        _settingRow(
+                          icon: Icons.event_available_rounded,
+                          tint: AppColors.accent,
+                          title: 'Show Google Calendar Events',
+                          value: _calendarSyncEnabled
+                              ? 'On · shown alongside your tasks in Today and Week'
+                              : 'Off',
+                          trailing: Switch.adaptive(
+                            value: _calendarSyncEnabled,
+                            activeThumbColor: AppColors.accent,
+                            onChanged: _toggleCalendarSync,
+                          ),
+                        ),
+                        _settingRow(
+                          icon: _calendarSignedIn
+                              ? Icons.check_circle_rounded
+                              : Icons.login_rounded,
+                          tint: _calendarSignedIn
+                              ? AppColors.success
+                              : AppColors.primary,
+                          title: _calendarSignedIn
+                              ? 'Disconnect Google Account'
+                              : 'Connect Google Account',
+                          value: _calendarSignedIn
+                              ? _calendarEmail ?? 'Connected'
+                              : 'Read-only — InkList never edits your calendar',
+                          onTap: _calendarSignedIn
+                              ? _disconnectCalendar
+                              : _connectCalendar,
+                        ),
+                      ]),
+                  ],
+
+                  // ── Claude Connector (local MCP bridge — kept in the
+                  // repo, off in shipped builds; see feature_flags.dart) ──
+                  if (kEnableMcpConnector) ...[
+                    const SizedBox(height: 24),
+                    SectionHeader(
+                      title: 'Claude Connector',
+                      subtitle: _mcpBridgeEnabled
+                          ? (MCPBridgeService.isRunning
+                              ? 'Running · reachable on your Wi-Fi'
+                              : 'On, but not reachable right now')
+                          : 'Off',
+                    ),
                     _settingsGroup([
                       _settingRow(
-                        icon: Icons.event_available_rounded,
+                        icon: Icons.hub_rounded,
                         tint: AppColors.accent,
-                        title: 'Show Google Calendar Events',
-                        value: _calendarSyncEnabled
-                            ? 'On · shown alongside your tasks in Today and Week'
-                            : 'Off',
+                        title: 'Enable Local API for Claude',
+                        value: _mcpBridgeEnabled
+                            ? 'On · only while InkList is open, same Wi-Fi only'
+                            : 'Lets Claude Desktop/Code read and manage tasks over your Wi-Fi',
                         trailing: Switch.adaptive(
-                          value: _calendarSyncEnabled,
+                          value: _mcpBridgeEnabled,
                           activeThumbColor: AppColors.accent,
-                          onChanged: _toggleCalendarSync,
+                          onChanged: _toggleMcpBridge,
                         ),
                       ),
-                      _settingRow(
-                        icon: _calendarSignedIn
-                            ? Icons.check_circle_rounded
-                            : Icons.login_rounded,
-                        tint: _calendarSignedIn
-                            ? AppColors.success
-                            : AppColors.primary,
-                        title: _calendarSignedIn
-                            ? 'Disconnect Google Account'
-                            : 'Connect Google Account',
-                        value: _calendarSignedIn
-                            ? _calendarEmail ?? 'Connected'
-                            : 'Read-only — InkList never edits your calendar',
-                        onTap: _calendarSignedIn
-                            ? _disconnectCalendar
-                            : _connectCalendar,
-                      ),
+                      if (_mcpBridgeEnabled) ...[
+                        _settingRow(
+                          icon: Icons.wifi_rounded,
+                          tint: AppColors.primary,
+                          title: 'Address',
+                          value: _mcpBridgeAddress != null
+                              ? 'http://$_mcpBridgeAddress:${MCPBridgeService.port} · tap to copy'
+                              : 'No Wi-Fi connection detected',
+                          onTap:
+                              _mcpBridgeAddress != null ? _copyMcpAddress : null,
+                        ),
+                        _settingRow(
+                          icon: Icons.key_rounded,
+                          tint: AppColors.primary,
+                          title: 'Token',
+                          value:
+                              '${_mcpBridgeToken.substring(0, _mcpBridgeToken.length.clamp(0, 8))}••••••• · tap to copy',
+                          onTap: _copyMcpToken,
+                        ),
+                        _settingRow(
+                          icon: Icons.refresh_rounded,
+                          tint: AppColors.textMuted,
+                          title: 'Regenerate Token',
+                          value:
+                              'Invalidates the old token — update your MCP server config after',
+                          onTap: _regenerateMcpToken,
+                        ),
+                      ],
                     ]),
-
-                  const SizedBox(height: 24),
-
-                  // ── Claude Connector (local MCP bridge) ─────────────────
-                  SectionHeader(
-                    title: 'Claude Connector',
-                    subtitle: _mcpBridgeEnabled
-                        ? (MCPBridgeService.isRunning
-                            ? 'Running · reachable on your Wi-Fi'
-                            : 'On, but not reachable right now')
-                        : 'Off',
-                  ),
-                  _settingsGroup([
-                    _settingRow(
-                      icon: Icons.hub_rounded,
-                      tint: AppColors.accent,
-                      title: 'Enable Local API for Claude',
-                      value: _mcpBridgeEnabled
-                          ? 'On · only while InkList is open, same Wi-Fi only'
-                          : 'Lets Claude Desktop/Code read and manage tasks over your Wi-Fi',
-                      trailing: Switch.adaptive(
-                        value: _mcpBridgeEnabled,
-                        activeThumbColor: AppColors.accent,
-                        onChanged: _toggleMcpBridge,
-                      ),
-                    ),
-                    if (_mcpBridgeEnabled) ...[
-                      _settingRow(
-                        icon: Icons.wifi_rounded,
-                        tint: AppColors.primary,
-                        title: 'Address',
-                        value: _mcpBridgeAddress != null
-                            ? 'http://$_mcpBridgeAddress:${MCPBridgeService.port} · tap to copy'
-                            : 'No Wi-Fi connection detected',
-                        onTap: _mcpBridgeAddress != null ? _copyMcpAddress : null,
-                      ),
-                      _settingRow(
-                        icon: Icons.key_rounded,
-                        tint: AppColors.primary,
-                        title: 'Token',
-                        value:
-                            '${_mcpBridgeToken.substring(0, _mcpBridgeToken.length.clamp(0, 8))}••••••• · tap to copy',
-                        onTap: _copyMcpToken,
-                      ),
-                      _settingRow(
-                        icon: Icons.refresh_rounded,
-                        tint: AppColors.textMuted,
-                        title: 'Regenerate Token',
-                        value:
-                            'Invalidates the old token — update your MCP server config after',
-                        onTap: _regenerateMcpToken,
-                      ),
-                    ],
-                  ]),
+                  ],
 
                   const SizedBox(height: 32),
                   Center(child: Text('InkList', style: T.caption1())),
