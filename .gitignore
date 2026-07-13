@@ -44,3 +44,8 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 android/build/
+
+# Built release APKs — local build output only, not source. Keeping these out
+# of git avoids a multi-hundred-MB history on a source repo; distribute built
+# APKs separately (Drive, direct transfer) if needed.
+/releases/
