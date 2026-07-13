@@ -6,11 +6,7 @@ import '../theme/app_theme.dart';
 import '../models/todo_task.dart';
 import '../services/todo_service.dart';
 import '../services/data_sync.dart';
-import '../services/groq_service.dart';
 import '../services/alarm_scheduler_service.dart';
-import '../services/behavior_insights_service.dart';
-import '../services/habit_service.dart';
-import '../services/pomodoro_service.dart';
 import '../services/google_calendar_service.dart';
 import '../models/calendar_event.dart';
 import '../config/feature_flags.dart';
@@ -23,8 +19,8 @@ import 'settings_screen.dart';
 
 /// InkList "Today" — a handwritten daily planner. Tasks are grouped into
 /// priority buckets (Backlog → Top Priorities → Must Do → If I Have Time),
-/// with a schedule strip for anything that has a time, a progress sheet, and
-/// the AI daily-focus note on top.
+/// with a schedule strip for anything that has a time and a progress sheet
+/// on top.
 class TodoScreen extends StatefulWidget {
   const TodoScreen({super.key});
   @override
@@ -34,11 +30,6 @@ class TodoScreen extends StatefulWidget {
 class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
   bool _loading = true;
   List<TodoTask> _all = const [];
-  String? _brief;
-  bool _briefLoading = false;
-  String? _weeklyReview;
-  bool _weeklyReviewLoading = false;
-  bool _aiConfigured = false;
   List<CalendarEvent> _calendarEvents = const [];
 
   @override
@@ -67,26 +58,14 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
 
   Future<void> _load() async {
     final all = await TodoService.getAll();
-    final configured = await GroqService.isConfigured;
-    final cachedBrief = configured ? await GroqService.getCachedDailyBrief() : null;
-    final cachedWeeklyReview =
-        configured ? await GroqService.getCachedWeeklyReview() : null;
     final events = await _loadTodayCalendarEvents();
     if (!mounted) return;
     setState(() {
       _all = all;
-      _aiConfigured = configured;
-      _brief = cachedBrief;
-      _weeklyReview = cachedWeeklyReview;
       _calendarEvents = events;
       _loading = false;
     });
   }
-
-  /// The weekly-review card only makes sense once a review actually exists
-  /// for the current week, or on Monday (when it's most worth generating).
-  bool get _showWeeklyReview =>
-      _aiConfigured && (_weeklyReview != null || DateTime.now().weekday == DateTime.monday);
 
   /// Empty list unless the user has both enabled and signed in to Calendar
   /// sync — never blocks the rest of Today from loading (see
@@ -100,53 +79,6 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
     final start = DateTime(now.year, now.month, now.day);
     final end = start.add(const Duration(days: 1));
     return GoogleCalendarService.fetchEventsForRange(start, end);
-  }
-
-  Future<void> _refreshDailyBrief() async {
-    if (_briefLoading) return;
-    setState(() => _briefLoading = true);
-    final now = DateTime.now();
-    final tasks = [
-      ...TodoService.tasksForDay(_all, now),
-      ...TodoService.overdueTasks(_all, asOf: now),
-    ];
-    final habits = await HabitService.getAll();
-    final sessions = await PomodoroService.getSessions();
-    final behaviorContext = BehaviorInsightsService.summarize(
-      tasks: _all,
-      habits: habits,
-      sessions: sessions,
-      now: now,
-    );
-    final result = await GroqService.dailyFocusBrief(
-      tasks,
-      behaviorContext: behaviorContext,
-    );
-    if (!mounted) return;
-    setState(() => _briefLoading = false);
-    if (result.isSuccess) {
-      setState(() => _brief = result.data);
-      await GroqService.setCachedDailyBrief(result.data!);
-    }
-  }
-
-  Future<void> _refreshWeeklyReview() async {
-    if (_weeklyReviewLoading) return;
-    setState(() => _weeklyReviewLoading = true);
-    final habits = await HabitService.getAll();
-    final sessions = await PomodoroService.getSessions();
-    final behaviorContext = BehaviorInsightsService.summarize(
-      tasks: _all,
-      habits: habits,
-      sessions: sessions,
-    );
-    final result = await GroqService.weeklyRetrospective(behaviorContext);
-    if (!mounted) return;
-    setState(() => _weeklyReviewLoading = false);
-    if (result.isSuccess) {
-      setState(() => _weeklyReview = result.data);
-      await GroqService.setCachedWeeklyReview(result.data!);
-    }
   }
 
   Future<void> _persist(TodoTask t, {bool showFeedback = true}) async {
@@ -235,15 +167,6 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
                 sliver: SliverToBoxAdapter(child: _progressSheet(done, today.length)),
               ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                sliver: SliverToBoxAdapter(child: _focusNote()),
-              ),
-              if (_showWeeklyReview)
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                  sliver: SliverToBoxAdapter(child: _weeklyReviewNote()),
-                ),
               if (timed.isNotEmpty)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -392,88 +315,6 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
           ]),
         ),
       ]),
-    );
-  }
-
-  // ── AI daily focus ─────────────────────────────────────────────────────────
-  Widget _focusNote() {
-    if (!_aiConfigured) {
-      return PaperCard(
-        color: AppColors.overlay,
-        child: Row(children: [
-          const Icon(Icons.auto_awesome_rounded, size: 18, color: AppColors.textMuted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text('Add your free Groq key in Settings for an AI daily brief',
-                style: T.footnote()),
-          ),
-          TextButton(
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen())),
-            child: Text('Settings',
-                style: T.footnote(c: AppColors.primary).copyWith(fontWeight: FontWeight.w700)),
-          ),
-        ]),
-      );
-    }
-    return StickyNote(
-      color: AppColors.hlLavender,
-      tilt: -0.012,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            const Icon(Icons.auto_awesome_rounded, size: 18, color: AppColors.accent),
-            const SizedBox(width: 8),
-            Text('Daily focus', style: T.title3().copyWith(fontSize: 22)),
-            const Spacer(),
-            if (_briefLoading)
-              const SizedBox(
-                  width: 16, height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
-            else
-              GestureDetector(
-                onTap: _refreshDailyBrief,
-                child: const Icon(Icons.refresh_rounded, size: 18, color: AppColors.textSecondary),
-              ),
-          ]),
-          const SizedBox(height: 6),
-          Text(_brief ?? 'Tap refresh to get today\'s priorities',
-              style: T.body(c: AppColors.textPrimary).copyWith(height: 1.35)),
-        ],
-      ),
-    );
-  }
-
-  Widget _weeklyReviewNote() {
-    return StickyNote(
-      color: AppColors.hlPeach,
-      tilt: 0.01,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            const Icon(Icons.auto_awesome_rounded, size: 18, color: AppColors.accent),
-            const SizedBox(width: 8),
-            Text('This week', style: T.title3().copyWith(fontSize: 22)),
-            const Spacer(),
-            if (_weeklyReviewLoading)
-              const SizedBox(
-                  width: 16, height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
-            else
-              GestureDetector(
-                onTap: _refreshWeeklyReview,
-                child: const Icon(Icons.refresh_rounded, size: 18, color: AppColors.textSecondary),
-              ),
-          ]),
-          const SizedBox(height: 6),
-          Text(_weeklyReview ?? 'Tap refresh for a look back at your week',
-              style: T.body(c: AppColors.textPrimary).copyWith(height: 1.35)),
-        ],
-      ),
     );
   }
 

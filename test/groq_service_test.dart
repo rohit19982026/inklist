@@ -177,20 +177,6 @@ void main() {
     });
   });
 
-  group('parseDailyBriefResponse', () {
-    test('passes through non-empty plain text', () {
-      const raw = '• Finish the report\n• Call the dentist back';
-      final result = GroqService.parseDailyBriefResponse(raw);
-      expect(result.isSuccess, isTrue);
-      expect(result.data, raw);
-    });
-
-    test('empty response degrades to a fail', () {
-      final result = GroqService.parseDailyBriefResponse('   ');
-      expect(result.isSuccess, isFalse);
-    });
-  });
-
   group('parseHabitSuggestions', () {
     test('parses a habits array', () {
       const raw = '{"habits": ["Drink 2L water", "Read 10 pages", "Stretch"]}';

@@ -19,8 +19,6 @@ class GroqService {
   static const _model = 'llama-3.3-70b-versatile';
   static const _apiKeyPrefKey = 'groq_api_key';
   static const _aiEnabledPrefKey = 'ai_features_enabled';
-  static const _dailyBriefCacheKey = 'ai_daily_brief_cache';
-  static const _weeklyReviewCacheKey = 'ai_weekly_review_cache';
   static const _timeout = Duration(seconds: 20);
 
   // ── Key management ──────────────────────────────────────────────────────
@@ -52,49 +50,6 @@ class GroqService {
   static Future<bool> get isConfigured async {
     final key = await getApiKey();
     return key != null && key.isNotEmpty && await isEnabled();
-  }
-
-  // ── Daily brief cache (avoid burning free-tier quota on every rebuild) ──
-  static Future<String?> getCachedDailyBrief() async {
-    final p = await SharedPreferences.getInstance();
-    final raw = p.getString(_dailyBriefCacheKey);
-    if (raw == null) return null;
-    try {
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      final cachedDate = j['date'] as String?;
-      if (cachedDate != _isoDate(DateTime.now())) return null;
-      return j['text'] as String?;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<void> setCachedDailyBrief(String text) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(_dailyBriefCacheKey,
-        jsonEncode({'date': _isoDate(DateTime.now()), 'text': text}));
-  }
-
-  // ── Weekly review cache (keyed by ISO week, not date, so it persists all
-  // week once generated rather than regenerating every day) ───────────────
-  static Future<String?> getCachedWeeklyReview() async {
-    final p = await SharedPreferences.getInstance();
-    final raw = p.getString(_weeklyReviewCacheKey);
-    if (raw == null) return null;
-    try {
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      final cachedWeek = j['week'] as String?;
-      if (cachedWeek != _isoWeekKey(DateTime.now())) return null;
-      return j['text'] as String?;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<void> setCachedWeeklyReview(String text) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(_weeklyReviewCacheKey,
-        jsonEncode({'week': _isoWeekKey(DateTime.now()), 'text': text}));
   }
 
   // ── Connectivity check ──────────────────────────────────────────────────
@@ -164,91 +119,6 @@ class GroqService {
     ], jsonMode: true);
     if (!resp.isSuccess) return GroqResult.fail(resp.error);
     return parseBreakdownResponse(resp.data!);
-  }
-
-  static Future<GroqResult<String>> dailyFocusBrief(
-    List<TodoTask> todayAndOverdue, {
-    Map<String, dynamic>? behaviorContext,
-  }) async {
-    final key = await getApiKey();
-    if (key == null || key.isEmpty) {
-      return const GroqResult.fail(
-          'Add your Groq API key in Settings to use AI features');
-    }
-    if (todayAndOverdue.isEmpty) {
-      return const GroqResult.fail('No tasks to summarize');
-    }
-    const system = 'You are a terse daily-focus assistant. Given today\'s '
-        'and overdue tasks (a JSON list with title/priority/overdue, plus '
-        'daysOverdue for anything overdue) and, when present, a "behavior" '
-        'object summarizing the user\'s actual '
-        'completion patterns over the last ~2 weeks (completion rates by '
-        'weekday/priority, recurring tasks that keep getting missed, habit '
-        'streaks, focus-session activity), write 1-3 short bullet points '
-        '(each under 15 words) telling the user what to prioritize today. '
-        'If "behavior" reveals something specific and relevant — a weak '
-        'weekday, a task that keeps getting missed, a strong habit streak '
-        '— call it out by name instead of generic advice. If "behavior" is '
-        'absent or too thin to say anything specific, just give a direct '
-        'read of today\'s tasks. Be direct, no fluff, no greetings.';
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final payload = jsonEncode({
-      'tasks': todayAndOverdue.map((t) {
-        final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
-        final overdue = !t.isRecurring && !t.isCompleted && due.isBefore(today);
-        return {
-          'title': t.title,
-          'priority': t.priority,
-          'overdue': overdue,
-          if (overdue) 'daysOverdue': today.difference(due).inDays,
-        };
-      }).toList(),
-      if (behaviorContext != null && behaviorContext.isNotEmpty)
-        'behavior': behaviorContext,
-    });
-    final resp = await _post(key, [
-      {'role': 'system', 'content': system},
-      {'role': 'user', 'content': payload},
-    ], jsonMode: false);
-    if (!resp.isSuccess) return GroqResult.fail(resp.error);
-    return parseDailyBriefResponse(resp.data!);
-  }
-
-  /// A short weekly-review narrative built entirely from [behaviorContext]
-  /// (the same 14-day snapshot every other behavior-aware feature uses) —
-  /// no task list needed, since the point is reflecting on the week's
-  /// patterns rather than today's to-dos.
-  static Future<GroqResult<String>> weeklyRetrospective(
-    Map<String, dynamic> behaviorContext,
-  ) async {
-    final key = await getApiKey();
-    if (key == null || key.isEmpty) {
-      return const GroqResult.fail(
-          'Add your Groq API key in Settings to use AI features');
-    }
-    if (behaviorContext.length <= 1) {
-      // Only windowDays present — nothing to reflect on yet.
-      return const GroqResult.fail('Not enough history yet for a weekly review');
-    }
-    const system = 'You are writing a short weekly review for a personal '
-        'to-do app, based on a "behavior" object summarizing the user\'s '
-        'actual patterns over the last ~2 weeks (completion rates '
-        'overall/by weekday/by priority, recurring tasks that keep getting '
-        'missed, habit streaks, focus-session activity). Write 3-5 '
-        'sentences that read like a real reflection, not generic '
-        'encouragement — cite specific numbers or named patterns from the '
-        'data (e.g. a completion-rate change, a specific chronically-'
-        'missed task, a habit streak). If the data is thin, keep it '
-        'short and honest rather than padding with fluff. No greetings, '
-        'no sign-off.';
-    final payload = jsonEncode({'behavior': behaviorContext});
-    final resp = await _post(key, [
-      {'role': 'system', 'content': system},
-      {'role': 'user', 'content': payload},
-    ], jsonMode: false);
-    if (!resp.isSuccess) return GroqResult.fail(resp.error);
-    return parseDailyBriefResponse(resp.data!);
   }
 
   /// Parses free text into one or more structured tasks — e.g. "buy milk,
@@ -664,14 +534,6 @@ class GroqService {
     }
   }
 
-  static GroqResult<String> parseDailyBriefResponse(String rawContent) {
-    final text = rawContent.trim();
-    if (text.isEmpty) {
-      return const GroqResult.fail('Groq returned an empty brief');
-    }
-    return GroqResult.ok(text);
-  }
-
   // ── HTTP core ────────────────────────────────────────────────────────────
 
   /// Returns the model's raw `message.content` string on success.
@@ -750,15 +612,4 @@ class GroqService {
   static String _weekdayName(int weekday) => const [
         'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
       ][weekday - 1];
-
-  /// A stable "year-Www" key identifying [date]'s ISO-8601 week — only
-  /// needs to be internally consistent (same week in → same key out) for
-  /// cache purposes, not a certified ISO week-numbering implementation.
-  static String _isoWeekKey(DateTime date) {
-    final thursday = date.add(Duration(days: 4 - date.weekday));
-    final ordinalDay =
-        thursday.difference(DateTime(thursday.year, 1, 1)).inDays + 1;
-    final week = ((ordinalDay - 1) / 7).floor() + 1;
-    return '${thursday.year}-W${week.toString().padLeft(2, '0')}';
-  }
 }
