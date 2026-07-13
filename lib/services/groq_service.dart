@@ -329,6 +329,43 @@ class GroqService {
     return parseFocusCoachResponse(resp.data!);
   }
 
+  /// A short, punchy congratulatory line shown in the celebration overlay
+  /// when a Pomodoro work session completes. Cheap and fast by design (this
+  /// is a nice-to-have swap-in, not something the celebration should ever
+  /// wait on) — the caller always has an instant local fallback message
+  /// ready before this resolves.
+  static Future<GroqResult<String>> pomodoroCelebrationMessage({
+    required String taskTitle,
+    required int completedRoundsToday,
+    Map<String, dynamic>? behaviorContext,
+  }) async {
+    final key = await getApiKey();
+    if (key == null || key.isEmpty) {
+      return const GroqResult.fail(
+          'Add your Groq API key in Settings to use AI features');
+    }
+    const system = 'The user just finished a 25-minute focus session in a '
+        'Pomodoro app. Write ONE short, punchy, celebratory sentence (under '
+        '14 words) congratulating them — energetic, like a small win, not '
+        'corporate or flowery. Reference the task title or session count '
+        'naturally if it fits (e.g. a 3rd session on the same task today is '
+        'genuine momentum worth calling out); otherwise just celebrate the '
+        'session itself. No emoji, no quotes, no sign-off. Respond ONLY '
+        'with JSON: {"message": string}.';
+    final payload = jsonEncode({
+      if (taskTitle.isNotEmpty) 'taskTitle': taskTitle,
+      'completedRoundsToday': completedRoundsToday,
+      if (behaviorContext != null && behaviorContext.isNotEmpty)
+        'behavior': behaviorContext,
+    });
+    final resp = await _post(key, [
+      {'role': 'system', 'content': system},
+      {'role': 'user', 'content': payload},
+    ], jsonMode: true, maxTokens: 40);
+    if (!resp.isSuccess) return GroqResult.fail(resp.error);
+    return parsePomodoroCelebrationResponse(resp.data!);
+  }
+
   /// AI habit ideas for the Habits tab. Given the habits the user already
   /// tracks, suggests a handful of complementary, concrete daily habits.
   static Future<GroqResult<List<String>>> suggestHabits(
@@ -556,6 +593,20 @@ class GroqService {
     } catch (_) {
       return const GroqResult.fail(
           'Groq returned an unexpected response — pick a task manually');
+    }
+  }
+
+  static GroqResult<String> parsePomodoroCelebrationResponse(String rawContent) {
+    try {
+      final j = jsonDecode(rawContent) as Map<String, dynamic>;
+      final message = (j['message'] as String?)?.trim() ?? '';
+      if (message.isEmpty) {
+        return const GroqResult.fail('Groq returned an empty message');
+      }
+      return GroqResult.ok(message);
+    } catch (_) {
+      return const GroqResult.fail(
+          'Groq returned an unexpected response');
     }
   }
 

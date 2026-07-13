@@ -15,6 +15,7 @@ import '../services/alarm_scheduler_service.dart';
 import '../services/behavior_insights_service.dart';
 import '../services/habit_service.dart';
 import '../widgets/ink_widgets.dart';
+import '../widgets/focus_celebration_overlay.dart';
 
 /// InkList "Focus" — a Pomodoro timer. Classic 25/5/15 cycles with a long
 /// break every N rounds, an optional bound task, an AI focus coach, and a
@@ -240,8 +241,45 @@ class _PomodoroScreenState extends State<PomodoroScreen>
     await _refreshSummary();
     if (mounted) {
       setState(() {});
-      if (!silent) _showPhaseBanner(finishedPhase);
+      if (!silent) {
+        // A completed work session gets the celebration overlay instead of
+        // the plain banner — break completions keep the low-key banner.
+        if (finishedPhase == PomodoroPhase.work) {
+          _celebrateFocusSession();
+        } else {
+          _showPhaseBanner(finishedPhase);
+        }
+      }
     }
+  }
+
+  /// Shows the celebration overlay immediately with an instant local
+  /// message, then swaps in an AI-generated one if it arrives in time — the
+  /// celebration itself never waits on the network.
+  void _celebrateFocusSession() {
+    FocusCelebrationOverlay.show(
+      context,
+      message: FocusCelebrationOverlay.randomLocalMessage(),
+      betterMessage: _fetchCelebrationMessage(),
+    );
+  }
+
+  Future<String?> _fetchCelebrationMessage() async {
+    if (!_aiConfigured) return null;
+    final all = await TodoService.getAll();
+    final habits = await HabitService.getAll();
+    final sessions = await PomodoroService.getSessions();
+    final behaviorContext = BehaviorInsightsService.summarize(
+      tasks: all,
+      habits: habits,
+      sessions: sessions,
+    );
+    final result = await GroqService.pomodoroCelebrationMessage(
+      taskTitle: _boundTaskTitle ?? '',
+      completedRoundsToday: _sessionsToday,
+      behaviorContext: behaviorContext,
+    );
+    return result.isSuccess ? result.data : null;
   }
 
   /// Move [_phase] to whatever should come next. When [countWork] and we just

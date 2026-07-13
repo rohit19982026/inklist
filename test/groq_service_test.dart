@@ -241,6 +241,26 @@ void main() {
     });
   });
 
+  group('parsePomodoroCelebrationResponse', () {
+    test('parses a well-formed celebration message', () {
+      const raw = '{"message": "Third session on this today — real momentum."}';
+      final result = GroqService.parsePomodoroCelebrationResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data, 'Third session on this today — real momentum.');
+    });
+
+    test('empty message degrades to a fail', () {
+      const raw = '{"message": ""}';
+      final result = GroqService.parsePomodoroCelebrationResponse(raw);
+      expect(result.isSuccess, isFalse);
+    });
+
+    test('malformed JSON degrades to a fail rather than throwing', () {
+      final result = GroqService.parsePomodoroCelebrationResponse('not json {{');
+      expect(result.isSuccess, isFalse);
+    });
+  });
+
   group('parseAlarmTimeResponse', () {
     test('parses a valid hour and minute', () {
       const raw = '{"hour": 7, "minute": 30}';
