@@ -65,6 +65,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
   bool _breakingDown = false;
   bool _alarmEnabled = false;
   bool _timeIsAiSuggested = false;
+  bool _timeIsDefaultSuggested = false;
   TimeOfDayMs? _aiSuggestedTimeSnapshot;
   bool _priorityIsAiSuggested = false;
   bool _priorityTouchedByUser = false;
@@ -153,6 +154,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
       setState(() {
         _time = newTime;
         _timeIsAiSuggested = false;
+        _timeIsDefaultSuggested = false;
         _aiSuggestedTimeSnapshot = null;
       });
     }
@@ -269,46 +271,78 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     }
   }
 
-  /// AI-suggested alarm time, offered automatically when the alarm is on
-  /// but no time is set yet — purely an enhancement in front of
-  /// [_defaultAlarmTime] below, which still runs at save time if this never
-  /// resolves (no AI configured, network failure, or the response was
-  /// invalid). A manual time pick always overrides this — every call site
-  /// that sets `_time` directly also clears [_timeIsAiSuggested].
+  /// Always leaves *some* time filled in once a title exists, rather than a
+  /// blank "No specific time" field — AI-suggested when configured (with
+  /// same-day tasks passed along so it avoids scheduling on top of them),
+  /// otherwise the local [_defaultAlarmTime] fallback (also conflict-aware).
+  /// Independent of the alarm-ring toggle: a task can have a scheduled time
+  /// without necessarily ringing. A manual time pick always overrides this —
+  /// every call site that sets `_time` directly also clears the suggestion
+  /// flags below.
   Future<void> _maybeSuggestAlarmTime() async {
-    if (_time != null || !_alarmEnabled) return;
+    if (_time != null) return;
     final title = _title.text.trim();
     if (title.isEmpty) return;
-    if (!await GroqService.isConfigured) return;
 
     final tasks = await TodoService.getAll();
-    final habits = await HabitService.getAll();
-    final sessions = await PomodoroService.getSessions();
-    final behaviorContext = BehaviorInsightsService.summarize(
-      tasks: tasks, habits: habits, sessions: sessions,
-    );
-    final feedbackContext = await AiFeedbackService.summarize();
+    final occupied = _sameDayOccupiedTimes(tasks);
 
-    final desc = _description.text.trim();
-    final result = await GroqService.suggestAlarmTime(
-      title: title,
-      description: desc.isEmpty ? null : desc,
-      priority: _priority,
-      dueDate: _dueDate,
-      recurrenceRule: _recurrenceRule,
-      behaviorContext: behaviorContext,
-      feedbackContext: feedbackContext,
-    );
-    // Re-check _time: the user may have picked one manually while this was
-    // in flight, or turned the alarm back off.
-    if (!mounted || _time != null || !_alarmEnabled || !result.isSuccess) {
-      return;
+    if (await GroqService.isConfigured) {
+      final habits = await HabitService.getAll();
+      final sessions = await PomodoroService.getSessions();
+      final behaviorContext = BehaviorInsightsService.summarize(
+        tasks: tasks, habits: habits, sessions: sessions,
+      );
+      final feedbackContext = await AiFeedbackService.summarize();
+      final desc = _description.text.trim();
+      final result = await GroqService.suggestAlarmTime(
+        title: title,
+        description: desc.isEmpty ? null : desc,
+        priority: _priority,
+        dueDate: _dueDate,
+        recurrenceRule: _recurrenceRule,
+        behaviorContext: behaviorContext,
+        feedbackContext: feedbackContext,
+        occupiedTimes: occupied
+            .map((t) =>
+                '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}')
+            .toList(),
+      );
+      // Re-check _time: the user may have picked one manually while this
+      // was in flight.
+      if (!mounted || _time != null) return;
+      if (result.isSuccess) {
+        setState(() {
+          _time = result.data;
+          _timeIsAiSuggested = true;
+          _aiSuggestedTimeSnapshot = result.data;
+        });
+        return;
+      }
     }
+
+    if (!mounted || _time != null) return;
     setState(() {
-      _time = result.data;
-      _timeIsAiSuggested = true;
-      _aiSuggestedTimeSnapshot = result.data;
+      _time = _defaultAlarmTime(occupied: occupied);
+      _timeIsDefaultSuggested = true;
     });
+  }
+
+  /// Other tasks' alarm times on the same [_dueDate] (excluding this task
+  /// itself when editing) — fed to the AI suggestion and the local default
+  /// fallback so a new task doesn't silently land on top of an existing one.
+  List<TimeOfDayMs> _sameDayOccupiedTimes(List<TodoTask> tasks) {
+    final out = <TimeOfDayMs>[];
+    for (final t in tasks) {
+      if (t.id == widget.existing?.id) continue;
+      final time = t.alarmTime;
+      if (time == null) continue;
+      final occursToday = t.isRecurring
+          ? RecurrenceRule.occursOn(t.recurrenceRule, _dueDate)
+          : _isSameDay(t.dueDate, _dueDate);
+      if (occursToday) out.add(time);
+    }
+    return out;
   }
 
   /// AI-suggested priority, mirroring [_maybeSuggestAlarmTime] exactly but
@@ -366,23 +400,51 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     setState(() => _likelyDuplicate = match);
   }
 
-  /// Default alarm time when the user enables the alarm but picks no time.
+  /// Local, non-AI fallback time — either when the user enables the alarm
+  /// but picks no time, or (see [_maybeSuggestAlarmTime]) whenever AI isn't
+  /// configured/available and a task still needs *some* time filled in.
   /// Prefers 9:00 AM, but for a task due *today* whose 9 AM has already
   /// passed it rolls forward to the next top-of-hour so the alarm still has a
-  /// future moment to fire (instead of silently landing in the past).
-  TimeOfDayMs _defaultAlarmTime() {
+  /// future moment to fire (instead of silently landing in the past), then
+  /// nudges away from [occupied] times so it doesn't land on top of another
+  /// task's scheduled time.
+  TimeOfDayMs _defaultAlarmTime({List<TimeOfDayMs> occupied = const []}) {
     final now = DateTime.now();
     final isToday = _dueDate.year == now.year &&
         _dueDate.month == now.month &&
         _dueDate.day == now.day;
     final nineAm = DateTime(_dueDate.year, _dueDate.month, _dueDate.day, 9, 0);
+    TimeOfDayMs candidate;
     if (!isToday || nineAm.isAfter(now)) {
-      return const TimeOfDayMs(hour: 9, minute: 0);
+      candidate = const TimeOfDayMs(hour: 9, minute: 0);
+    } else {
+      // Today, past 9 AM → next top-of-hour, if one still exists before midnight.
+      final nextHour = now.hour + 1;
+      candidate = nextHour <= 23
+          ? TimeOfDayMs(hour: nextHour, minute: 0)
+          : const TimeOfDayMs(hour: 9, minute: 0); // late-night edge, best effort
     }
-    // Today, past 9 AM → next top-of-hour, if one still exists before midnight.
-    final nextHour = now.hour + 1;
-    if (nextHour <= 23) return TimeOfDayMs(hour: nextHour, minute: 0);
-    return const TimeOfDayMs(hour: 9, minute: 0); // late-night edge, best effort
+    return _avoidConflicts(candidate, occupied);
+  }
+
+  /// Steps [start] forward in 30-minute increments until it's at least 30
+  /// minutes from every time in [occupied], or the search runs out of room
+  /// before midnight (in which case the original candidate is returned —
+  /// a slightly-crowded default beats silently failing to set one at all).
+  TimeOfDayMs _avoidConflicts(TimeOfDayMs start, List<TimeOfDayMs> occupied) {
+    if (occupied.isEmpty) return start;
+    const bufferMinutes = 30;
+    const stepMinutes = 30;
+    const lastSlotMinutes = 23 * 60 + 30;
+    final occupiedMinutes = occupied.map((t) => t.hour * 60 + t.minute).toList();
+    var minutes = start.hour * 60 + start.minute;
+    while (minutes <= lastSlotMinutes) {
+      final conflict =
+          occupiedMinutes.any((o) => (o - minutes).abs() < bufferMinutes);
+      if (!conflict) return TimeOfDayMs(hour: minutes ~/ 60, minute: minutes % 60);
+      minutes += stepMinutes;
+    }
+    return start;
   }
 
   void _save() {
@@ -557,6 +619,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                             _time = null;
                             _alarmEnabled = false;
                             _timeIsAiSuggested = false;
+                            _timeIsDefaultSuggested = false;
                             _aiSuggestedTimeSnapshot = null;
                           });
                         },
@@ -575,6 +638,15 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                   const SizedBox(width: 4),
                   Text('AI suggested — tap to change',
                       style: T.caption2(c: AppColors.accent)),
+                ]),
+              ] else if (_timeIsDefaultSuggested) ...[
+                const SizedBox(height: 4),
+                Row(children: [
+                  const Icon(Icons.schedule_rounded,
+                      size: 12, color: AppColors.textMuted),
+                  const SizedBox(width: 4),
+                  Text('Suggested default — tap to change',
+                      style: T.caption2(c: AppColors.textMuted)),
                 ]),
               ],
               if (_time != null) ...[

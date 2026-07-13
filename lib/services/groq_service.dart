@@ -427,6 +427,7 @@ class GroqService {
     required String recurrenceRule,
     Map<String, dynamic>? behaviorContext,
     Map<String, dynamic>? feedbackContext,
+    List<String>? occupiedTimes,
   }) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
@@ -446,8 +447,12 @@ class GroqService {
         '("alarmTimeSuggestions": {total, acceptedPercent, avgEditMinutes}) '
         'showing how past suggestions of this kind were received — if '
         'avgEditMinutes shows a consistent bias (e.g. users move suggested '
-        'times ~30 minutes later), shift your default accordingly. Respond '
-        'ONLY with JSON: {"hour": 0-23, "minute": 0-59}.';
+        'times ~30 minutes later), shift your default accordingly. It may '
+        'also include "occupiedTimes" — a list of "HH:MM" times already '
+        'taken by other tasks due the same day. Avoid landing within 30 '
+        'minutes of any of those, picking the nearest sensible free slot '
+        'instead, unless the task title makes an exact time unavoidable. '
+        'Respond ONLY with JSON: {"hour": 0-23, "minute": 0-59}.';
     final payload = jsonEncode({
       'title': title,
       if (description != null && description.isNotEmpty)
@@ -459,6 +464,8 @@ class GroqService {
         'behavior': behaviorContext,
       if (feedbackContext != null && feedbackContext.isNotEmpty)
         'feedback': feedbackContext,
+      if (occupiedTimes != null && occupiedTimes.isNotEmpty)
+        'occupiedTimes': occupiedTimes,
     });
     final resp = await _post(key, [
       {'role': 'system', 'content': system},
