@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 /// Wraps the OS POST_NOTIFICATIONS runtime permission (required on Android
@@ -24,4 +25,17 @@ class NotificationPermissionService {
   }
 
   static Future<void> openSettings() => openAppSettings();
+
+  static const _methods = MethodChannel('com.rohit.inklist/methods');
+
+  /// Opens the per-app notification *channel* list directly (Task Alarms,
+  /// Smart Reminders, ...), not just the general on/off toggle. The app-level
+  /// `Permission.notification` check above can read "granted" while the user
+  /// has muted one specific channel (e.g. Task Alarms) in system settings —
+  /// this is the only way to see and fix that from here.
+  static Future<void> openChannelSettings() async {
+    try {
+      await _methods.invokeMethod('openPostNotificationsPermission');
+    } catch (_) {}
+  }
 }

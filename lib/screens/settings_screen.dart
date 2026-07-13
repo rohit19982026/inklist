@@ -23,6 +23,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _groqApiKey;
   bool _canScheduleExactAlarms = true;
   bool _canUseFullScreenIntent = true;
+  bool _ignoringBatteryOptimizations = true;
   bool _notificationsGranted = true;
   bool _notificationsPermanentlyDenied = false;
   bool _smartRemindersEnabled = false;
@@ -44,6 +45,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       NotificationPermissionService.isGranted(),
       NotificationPermissionService.isPermanentlyDenied(),
       AlarmSchedulerService.canUseFullScreenIntent(),
+      AlarmSchedulerService.isIgnoringBatteryOptimizations(),
     ]);
     if (!mounted) return;
     setState(() {
@@ -55,6 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _notificationsGranted = r[5] as bool;
       _notificationsPermanentlyDenied = r[6] as bool;
       _canUseFullScreenIntent = r[7] as bool;
+      _ignoringBatteryOptimizations = r[8] as bool;
       _loading = false;
     });
   }
@@ -179,6 +182,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               color: AppColors.success)
                           : null,
                     ),
+                    _settingRow(
+                      icon: Icons.tune_rounded,
+                      tint: AppColors.textMuted,
+                      title: 'Notification Channels',
+                      value:
+                          'If alarms still stay silent, check Task Alarms isn\'t muted here',
+                      onTap: NotificationPermissionService.openChannelSettings,
+                    ),
                   ]),
 
                   const SizedBox(height: 24),
@@ -256,6 +267,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             'Required for the alarm to pop up over your lock screen — tap to grant',
                         onTap: () async {
                           await AlarmSchedulerService.requestFullScreenIntentPermission();
+                          _load();
+                        },
+                      ),
+                    if (!_ignoringBatteryOptimizations)
+                      _settingRow(
+                        icon: Icons.battery_alert_rounded,
+                        tint: AppColors.danger,
+                        title: 'Allow Background Activity',
+                        value:
+                            'Most likely cause of missed alarms — your phone\'s battery saver can silently block them. Tap to exempt InkList.',
+                        onTap: () async {
+                          await AlarmSchedulerService.requestIgnoreBatteryOptimizations();
                           _load();
                         },
                       ),

@@ -1,9 +1,11 @@
 package com.rohit.inklist
 
 import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -56,6 +58,34 @@ class MainActivity : FlutterActivity() {
 
                     "requestDndAccess" -> {
                         startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+                        result.success(null)
+                    }
+
+                    // Standard battery optimization (Doze/App Standby) is a
+                    // separate axis from every permission above — a phone can
+                    // have notifications, exact alarms, and full-screen intent
+                    // all granted and still have the OS defer or kill the alarm
+                    // work in the background. This is the single most common
+                    // cause of "everything's allowed but it still doesn't fire"
+                    // on real devices (especially MIUI/ColorOS/One UI).
+                    "isIgnoringBatteryOptimizations" -> {
+                        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                        result.success(pm.isIgnoringBatteryOptimizations(packageName))
+                    }
+
+                    "requestIgnoreBatteryOptimizations" -> {
+                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                        intent.data = Uri.parse("package:$packageName")
+                        try {
+                            startActivity(intent)
+                        } catch (_: Exception) {
+                            // Some OEMs block this intent outright — fall back to the
+                            // general battery-optimization list so the user can find
+                            // InkList and exempt it manually.
+                            try {
+                                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            } catch (_: Exception) {}
+                        }
                         result.success(null)
                     }
 

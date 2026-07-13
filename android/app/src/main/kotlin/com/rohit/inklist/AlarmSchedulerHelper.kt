@@ -30,6 +30,13 @@ object AlarmSchedulerHelper {
      * manual Settings trip, not a normal runtime dialog, so silently
      * swallowing the exception (the old behavior) meant the task looked
      * saved with its alarm "on" while nothing was ever scheduled.
+     *
+     * Uses setAlarmClock() rather than setExactAndAllowWhileIdle(): both need
+     * the same exact-alarm permission on API 31+, but only setAlarmClock is
+     * fully exempt from Doze/App Standby throttling — it's the API real
+     * alarm-clock apps use, which is exactly what this feature promises ("ring
+     * like a real alarm clock"). It also surfaces the standard alarm-clock
+     * icon in the status bar, a visible sign to the user that one is armed.
      */
     fun schedule(
         context: Context,
@@ -57,12 +64,12 @@ object AlarmSchedulerHelper {
             context, requestCode, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val showIntent = PendingIntent.getActivity(
+            context, requestCode, Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pending)
-            } else {
-                am.setExact(AlarmManager.RTC_WAKEUP, triggerAtMillis, pending)
-            }
+            am.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAtMillis, showIntent), pending)
             true
         } catch (e: SecurityException) {
             false

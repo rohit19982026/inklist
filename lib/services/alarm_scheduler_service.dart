@@ -30,6 +30,25 @@ class AlarmSchedulerService {
     } catch (_) {}
   }
 
+  /// Standard Android battery optimization (Doze/App Standby) is separate
+  /// from every other permission here — many OEMs (MIUI, ColorOS, One UI...)
+  /// still throttle or kill background alarm work for apps under it, even
+  /// with notifications, exact alarms, and full-screen intent all granted.
+  /// Defaults to true (nothing to fix) if the platform call fails.
+  static Future<bool> isIgnoringBatteryOptimizations() async {
+    try {
+      return await _methods.invokeMethod<bool>('isIgnoringBatteryOptimizations') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> requestIgnoreBatteryOptimizations() async {
+    try {
+      await _methods.invokeMethod('requestIgnoreBatteryOptimizations');
+    } catch (_) {}
+  }
+
   /// Android 14+ only: a separate toggle from POST_NOTIFICATIONS that gates
   /// whether the alarm's full-screen ringing UI is allowed to auto-launch.
   /// Defaults to true (nothing to fix) on older Android or if the platform
@@ -117,7 +136,16 @@ class AlarmSchedulerService {
     return scheduleTaskAlarm(task);
   }
 
-  static int _requestCode(String taskId) => taskId.hashCode;
+  /// Must match Kotlin/Java's `String.hashCode()` exactly — NOT Dart's
+  /// built-in `String.hashCode`, which uses a different algorithm. The
+  /// native side recomputes this same requestCode independently in two
+  /// places Dart can't call into directly: AlarmReceiver re-arming a
+  /// recurring task's next occurrence, and BootReceiver rescheduling
+  /// everything after a reboot. If the two algorithms disagree, a later
+  /// `cancelTaskAlarm`/`scheduleTaskAlarm` from Dart targets a different
+  /// PendingIntent than the one actually armed — the real alarm survives
+  /// being "turned off", or a duplicate gets scheduled alongside it.
+  static int _requestCode(String taskId) => javaStringHashCode(taskId);
 
   static int? _nextTriggerMillis(TodoTask task) {
     final time = task.alarmTime;
@@ -140,4 +168,18 @@ class AlarmSchedulerService {
     }
     return null;
   }
+}
+
+/// A port of Java/Kotlin's `String.hashCode()` — `s[0]*31^(n-1) + ... +
+/// s[n-1]`, over UTF-16 code units, wrapped to a 32-bit signed int. Dart's
+/// own `String.hashCode` is a different, incompatible algorithm; this exists
+/// so a taskId hashes to the same requestCode on both sides of the platform
+/// channel. Masking after every step keeps the running value within 32 bits
+/// throughout, matching Java's per-operation integer overflow exactly.
+int javaStringHashCode(String s) {
+  var hash = 0;
+  for (final unit in s.codeUnits) {
+    hash = (31 * hash + unit) & 0xFFFFFFFF;
+  }
+  return hash >= 0x80000000 ? hash - 0x100000000 : hash;
 }

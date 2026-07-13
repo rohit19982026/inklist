@@ -16,6 +16,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <!-- Task alarms: many OEMs (MIUI, ColorOS, FuntouchOS, One UI, ...) kill
+         background work for apps under standard battery optimization even
+         with every other alarm/notification permission granted. This lets
+         Settings offer the "unrestricted battery usage" exemption an actual
+         alarm-clock app needs to fire reliably while the screen is off. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <!-- Smart Reminders: brief background check-ins that call Groq and act -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
