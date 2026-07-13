@@ -12,6 +12,8 @@ import '../services/data_sync.dart';
 import '../services/groq_service.dart';
 import '../services/pomodoro_service.dart';
 import '../services/alarm_scheduler_service.dart';
+import '../services/behavior_insights_service.dart';
+import '../services/habit_service.dart';
 import '../widgets/ink_widgets.dart';
 
 /// InkList "Focus" — a Pomodoro timer. Classic 25/5/15 cycles with a long
@@ -290,7 +292,18 @@ class _PomodoroScreenState extends State<PomodoroScreen>
       return;
     }
     setState(() => _coaching = true);
-    final result = await GroqService.focusCoach(_openTasks);
+    final all = await TodoService.getAll();
+    final habits = await HabitService.getAll();
+    final sessions = await PomodoroService.getSessions();
+    final behaviorContext = BehaviorInsightsService.summarize(
+      tasks: all,
+      habits: habits,
+      sessions: sessions,
+    );
+    final result = await GroqService.focusCoach(
+      _openTasks,
+      behaviorContext: behaviorContext,
+    );
     if (!mounted) return;
     setState(() => _coaching = false);
     if (!result.isSuccess) {

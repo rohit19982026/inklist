@@ -8,6 +8,9 @@ import '../services/todo_service.dart';
 import '../services/data_sync.dart';
 import '../services/groq_service.dart';
 import '../services/alarm_scheduler_service.dart';
+import '../services/behavior_insights_service.dart';
+import '../services/habit_service.dart';
+import '../services/pomodoro_service.dart';
 import '../widgets/todo_editor_sheet.dart';
 import '../widgets/nl_quick_add_sheet.dart';
 import '../widgets/ink_widgets.dart';
@@ -77,7 +80,18 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
       ...TodoService.tasksForDay(_all, now),
       ...TodoService.overdueTasks(_all, asOf: now),
     ];
-    final result = await GroqService.dailyFocusBrief(tasks);
+    final habits = await HabitService.getAll();
+    final sessions = await PomodoroService.getSessions();
+    final behaviorContext = BehaviorInsightsService.summarize(
+      tasks: _all,
+      habits: habits,
+      sessions: sessions,
+      now: now,
+    );
+    final result = await GroqService.dailyFocusBrief(
+      tasks,
+      behaviorContext: behaviorContext,
+    );
     if (!mounted) return;
     setState(() => _briefLoading = false);
     if (result.isSuccess) {

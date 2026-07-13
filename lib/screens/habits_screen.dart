@@ -9,6 +9,8 @@ import '../services/entitlement_service.dart';
 import '../services/groq_service.dart';
 import '../services/data_sync.dart';
 import '../services/todo_service.dart';
+import '../services/pomodoro_service.dart';
+import '../services/behavior_insights_service.dart';
 import '../widgets/ink_widgets.dart';
 import 'settings_screen.dart';
 
@@ -127,8 +129,17 @@ class _HabitsScreenState extends State<HabitsScreen> with WidgetsBindingObserver
       return;
     }
     setState(() => _suggesting = true);
-    final result =
-        await GroqService.suggestHabits(_habits.map((h) => h.title).toList());
+    final tasks = await TodoService.getAll();
+    final sessions = await PomodoroService.getSessions();
+    final behaviorContext = BehaviorInsightsService.summarize(
+      tasks: tasks,
+      habits: _habits,
+      sessions: sessions,
+    );
+    final result = await GroqService.suggestHabits(
+      _habits.map((h) => h.title).toList(),
+      behaviorContext: behaviorContext,
+    );
     if (!mounted) return;
     setState(() => _suggesting = false);
     if (!result.isSuccess) {

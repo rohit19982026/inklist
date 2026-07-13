@@ -144,7 +144,9 @@ class GroqService {
   }
 
   static Future<GroqResult<String>> dailyFocusBrief(
-      List<TodoTask> todayAndOverdue) async {
+    List<TodoTask> todayAndOverdue, {
+    Map<String, dynamic>? behaviorContext,
+  }) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
       return const GroqResult.fail(
@@ -154,20 +156,32 @@ class GroqService {
       return const GroqResult.fail('No tasks to summarize');
     }
     const system = 'You are a terse daily-focus assistant. Given today\'s '
-        'and overdue tasks (as a JSON list with title/priority/overdue), '
-        'write 1-3 short bullet points (each under 15 words) telling the '
-        'user what to prioritize today. Be direct, no fluff, no greetings.';
+        'and overdue tasks (a JSON list with title/priority/overdue) and, '
+        'when present, a "behavior" object summarizing the user\'s actual '
+        'completion patterns over the last ~2 weeks (completion rates by '
+        'weekday/priority, recurring tasks that keep getting missed, habit '
+        'streaks, focus-session activity), write 1-3 short bullet points '
+        '(each under 15 words) telling the user what to prioritize today. '
+        'If "behavior" reveals something specific and relevant — a weak '
+        'weekday, a task that keeps getting missed, a strong habit streak '
+        '— call it out by name instead of generic advice. If "behavior" is '
+        'absent or too thin to say anything specific, just give a direct '
+        'read of today\'s tasks. Be direct, no fluff, no greetings.';
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final payload = jsonEncode(todayAndOverdue
-        .map((t) => {
-              'title': t.title,
-              'priority': t.priority,
-              'overdue': !t.isRecurring &&
-                  DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day)
-                      .isBefore(today),
-            })
-        .toList());
+    final payload = jsonEncode({
+      'tasks': todayAndOverdue
+          .map((t) => {
+                'title': t.title,
+                'priority': t.priority,
+                'overdue': !t.isRecurring &&
+                    DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day)
+                        .isBefore(today),
+              })
+          .toList(),
+      if (behaviorContext != null && behaviorContext.isNotEmpty)
+        'behavior': behaviorContext,
+    });
     final resp = await _post(key, [
       {'role': 'system', 'content': system},
       {'role': 'user', 'content': payload},
@@ -208,7 +222,9 @@ class GroqService {
   /// returns a one-line reason. [taskTitle] echoes one of the given titles
   /// (or is empty) so the UI can auto-bind the session to that task.
   static Future<GroqResult<FocusSuggestion>> focusCoach(
-      List<TodoTask> candidates) async {
+    List<TodoTask> candidates, {
+    Map<String, dynamic>? behaviorContext,
+  }) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
       return const GroqResult.fail(
@@ -218,14 +234,26 @@ class GroqService {
       return const GroqResult.fail('Add some tasks first, then ask for focus');
     }
     const system = 'You are a focus coach for a 25-minute Pomodoro session. '
-        'Given the user\'s pending tasks (a JSON list with title/priority), '
-        'pick the single best task to focus on right now. Respond with JSON: '
+        'Given the user\'s pending tasks (a JSON list with title/priority) '
+        'and, when present, a "behavior" object with their actual recent '
+        'focus-session activity (pomodoroTopFocusedTasks — titles they\'ve '
+        'already been putting session time into) and completion patterns, '
+        'pick the single best task to focus on right now. Prefer a task '
+        'they\'ve already started focusing on recently (in '
+        'pomodoroTopFocusedTasks) to help them finish it, unless a higher-'
+        'priority task clearly needs attention first. Respond with JSON: '
         '{"task": string, "message": string}. "task" MUST be exactly one of '
         'the given titles verbatim, or "" if none fit. "message" is one '
-        'encouraging sentence under 18 words on why to start there. No fluff.';
-    final payload = jsonEncode(candidates
-        .map((t) => {'title': t.title, 'priority': t.priority})
-        .toList());
+        'encouraging sentence under 18 words on why to start there — '
+        'reference the specific pattern (e.g. "you\'ve already put time '
+        'into this") when it applies. No fluff.';
+    final payload = jsonEncode({
+      'tasks': candidates
+          .map((t) => {'title': t.title, 'priority': t.priority})
+          .toList(),
+      if (behaviorContext != null && behaviorContext.isNotEmpty)
+        'behavior': behaviorContext,
+    });
     final resp = await _post(key, [
       {'role': 'system', 'content': system},
       {'role': 'user', 'content': payload},
@@ -237,7 +265,9 @@ class GroqService {
   /// AI habit ideas for the Habits tab. Given the habits the user already
   /// tracks, suggests a handful of complementary, concrete daily habits.
   static Future<GroqResult<List<String>>> suggestHabits(
-      List<String> existingTitles) async {
+    List<String> existingTitles, {
+    Map<String, dynamic>? behaviorContext,
+  }) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
       return const GroqResult.fail(
@@ -247,13 +277,23 @@ class GroqService {
         ? 'none yet'
         : existingTitles.join(', ');
     final system = 'You suggest daily habits for a habit tracker. The user '
-        'already tracks: $existing. Suggest 5 concrete, specific, doable '
-        'daily habits that complement those without duplicating them. Keep '
-        'each under 4 words, action-oriented (e.g. "Drink 2L water", "Read '
-        '10 pages"). Respond ONLY with JSON: {"habits": [string, ...]}.';
+        'already tracks: $existing. The user message may include a '
+        '"behavior" object with "habitStreaks" (title/streak/completion '
+        'rate for their existing habits) and task-completion patterns. If '
+        'a tracked habit has a low completion rate, suggest something '
+        'easier or differently-timed as a complement rather than piling on '
+        'more of the same difficulty; if their streaks are strong, feel '
+        'free to suggest something a bit more ambitious. Suggest 5 '
+        'concrete, specific, doable daily habits that complement what they '
+        'already track without duplicating them. Keep each under 4 words, '
+        'action-oriented (e.g. "Drink 2L water", "Read 10 pages"). Respond '
+        'ONLY with JSON: {"habits": [string, ...]}.';
+    final userContent = behaviorContext != null && behaviorContext.isNotEmpty
+        ? jsonEncode({'behavior': behaviorContext})
+        : 'Suggest habits.';
     final resp = await _post(key, [
       {'role': 'system', 'content': system},
-      {'role': 'user', 'content': 'Suggest habits.'},
+      {'role': 'user', 'content': userContent},
     ], jsonMode: true);
     if (!resp.isSuccess) return GroqResult.fail(resp.error);
     return parseHabitSuggestions(resp.data!);

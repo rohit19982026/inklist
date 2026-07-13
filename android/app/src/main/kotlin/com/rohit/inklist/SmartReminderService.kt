@@ -102,7 +102,14 @@ class SmartReminderService : Service() {
         val apiKey = prefs.getString(KEY_API_KEY, null)
 
         val decision = if (aiEnabled && !apiKey.isNullOrBlank()) {
-            callGroqForDecision(apiKey, relevant, nagState) ?: ruleBasedDecision(relevant, nagState)
+            val behavior = BehaviorPrefsHelper.computeBehaviorSnapshot(
+                tasks,
+                BehaviorPrefsHelper.readHabits(applicationContext),
+                BehaviorPrefsHelper.readPomodoroSessions(applicationContext),
+                todayCal,
+            )
+            callGroqForDecision(apiKey, relevant, nagState, behavior)
+                ?: ruleBasedDecision(relevant, nagState)
         } else {
             ruleBasedDecision(relevant, nagState)
         }
@@ -245,11 +252,18 @@ class SmartReminderService : Service() {
     // ── Groq call ────────────────────────────────────────────────────────────
 
     private fun callGroqForDecision(
-        apiKey: String, relevant: List<RelevantTask>, nagState: NagState
+        apiKey: String, relevant: List<RelevantTask>, nagState: NagState, behavior: JSONObject
     ): Decision? {
         val systemPrompt = "You are a task-reminder assistant for a personal to-do app. You " +
             "will be given the user's relevant tasks right now (title, priority, whether " +
-            "overdue) and how many times they've already been nagged today. Decide ONE of: " +
+            "overdue), how many times they've already been nagged today, and — when present " +
+            "— a \"behavior\" object summarizing their actual completion patterns over the " +
+            "last ~2 weeks (completion rates by weekday/priority, recurring tasks that keep " +
+            "getting missed, habit streaks, focus-session activity). Use \"behavior\" to judge " +
+            "urgency more accurately (e.g. a task on a weekday/category with a chronically low " +
+            "completion rate deserves a more direct nudge than a one-off slip); reference a " +
+            "specific pattern in \"message\" when it's relevant, otherwise ignore \"behavior\" " +
+            "if it's absent or too thin. Decide ONE of: " +
             "\"none\" (nothing meaningfully new since the last check-in), \"notify\" (a normal " +
             "notification is warranted), or \"alarm\" (only for a HIGH-priority task that is " +
             "overdue and hasn't already triggered an alarm today — use sparingly, most " +
@@ -272,6 +286,7 @@ class SmartReminderService : Service() {
             put("tasks", tasksJson)
             put("notifyCountToday", nagState.notifyCount)
             put("alarmCountToday", nagState.alarmCount)
+            if (behavior.length() > 1) put("behavior", behavior) // >1: more than just windowDays
         }.toString()
 
         val content = postGroq(apiKey, systemPrompt, userContent) ?: return null
