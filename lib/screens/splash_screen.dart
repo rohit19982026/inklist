@@ -26,7 +26,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Color(0xFF312E81),
+      systemNavigationBarColor: AppColors.primaryDark,
       systemNavigationBarIconBrightness: Brightness.light,
     ));
 
@@ -64,7 +64,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF312E81),
+      backgroundColor: AppColors.primaryDark,
       body: AnimatedBuilder(
         animation: _ctrl,
         builder: (_, __) => Stack(
@@ -181,73 +181,71 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
   }
 }
 
+/// The InkList mark: a bold ink checkmark on the brand gradient, matching
+/// the app's adaptive launcher icon (see android ic_launcher_foreground.xml)
+/// so the splash and the icon read as the same brand.
 class _LogoMark extends StatelessWidget {
   const _LogoMark();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 96, height: 96,
+      width: 104, height: 104,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Colors.white, Color(0xFFE0E7FF)],
-        ),
+        borderRadius: BorderRadius.circular(24),
+        gradient: AppColors.heroGradient,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 30, offset: const Offset(0, 12),
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 32, offset: const Offset(0, 14),
           ),
         ],
       ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Currency symbol with stylized chart bars
-          const Padding(
-            padding: EdgeInsets.only(bottom: 6),
-            child: Text('₹',
-                style: TextStyle(
-                  fontSize: 56,
-                  fontWeight: FontWeight.w900,
-                  color: AppColors.primaryDark,
-                  height: 1,
-                )),
-          ),
-          // Tiny chart bars at the bottom
-          Positioned(
-            bottom: 14,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: const [
-                _Bar(height: 6, color: AppColors.primary),
-                SizedBox(width: 3),
-                _Bar(height: 10, color: AppColors.primary),
-                SizedBox(width: 3),
-                _Bar(height: 8,  color: AppColors.accent),
-                SizedBox(width: 3),
-                _Bar(height: 14, color: AppColors.primary),
-              ],
-            ),
-          ),
-        ],
+      child: CustomPaint(
+        size: const Size(104, 104),
+        painter: _CheckmarkPainter(),
       ),
     );
   }
 }
 
-class _Bar extends StatelessWidget {
-  final double height;
-  final Color color;
-  const _Bar({required this.height, required this.color});
+/// Draws the same checkmark geometry as the native icon's foreground vector
+/// (a 108x108 safe zone, points (32,58)-(47,72)-(80,34)), scaled to fit.
+class _CheckmarkPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide / 108;
+    final path = Path()
+      ..moveTo(32 * s, 58 * s)
+      ..lineTo(47 * s, 72 * s)
+      ..lineTo(80 * s, 34 * s);
+
+    canvas.save();
+    canvas.translate(0.4 * s, 2.2 * s);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = Colors.black.withValues(alpha: 0.18)
+        ..strokeWidth = 14 * s
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke,
+    );
+    canvas.restore();
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = Colors.white
+        ..strokeWidth = 14 * s
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke,
+    );
+  }
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 3, height: height,
-    decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(1.5)),
-  );
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _Glow extends StatelessWidget {
