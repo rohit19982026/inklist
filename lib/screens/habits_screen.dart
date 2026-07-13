@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -13,6 +14,7 @@ import '../services/pomodoro_service.dart';
 import '../services/behavior_insights_service.dart';
 import '../services/ai_feedback_service.dart';
 import '../widgets/ink_widgets.dart';
+import '../widgets/celebration_overlay.dart';
 import 'settings_screen.dart';
 
 /// InkList "Habits" — a weekly habit grid. Each habit is a paper card with a
@@ -71,12 +73,33 @@ class _HabitsScreenState extends State<HabitsScreen> with WidgetsBindingObserver
   bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
+  static const _habitCelebrationMessages = [
+    'Habit locked in! 🌱',
+    'Another day, another win.',
+    'Consistency is showing.',
+    'That\'s the streak talking.',
+    'Nice — keep the chain going.',
+    'Small step, real progress.',
+  ];
+
   Future<void> _toggle(Habit h, DateTime day) async {
     // Don't allow ticking the future.
     if (day.isAfter(DateTime.now())) return;
     HapticFeedback.lightImpact();
+    final wasDone = h.isDoneOn(day);
     await HabitService.toggle(h.id, day);
     DataSync.notifyChanged();
+    // Celebrate completing *today's* box specifically — backfilling a past
+    // day or un-checking a box shouldn't trigger the "did it today" payoff.
+    if (!wasDone && _isSameDay(day, DateTime.now()) && mounted) {
+      CelebrationOverlay.show(
+        context,
+        message: _habitCelebrationMessages[
+            math.Random().nextInt(_habitCelebrationMessages.length)],
+        icon: Icons.check_circle_rounded,
+        iconColor: AppColors.success,
+      );
+    }
   }
 
   Future<void> _addHabit() async {
@@ -387,25 +410,35 @@ class _HabitsScreenState extends State<HabitsScreen> with WidgetsBindingObserver
                 .copyWith(fontWeight: isToday ? FontWeight.w800 : FontWeight.w600)),
         const SizedBox(height: 6),
         AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
+          duration: const Duration(milliseconds: 260),
           curve: Curves.easeOut,
           width: 32,
           height: 32,
           decoration: BoxDecoration(
-            color: done ? color : AppColors.fill,
+            color: done ? AppColors.success : AppColors.fill,
             shape: BoxShape.circle,
+            // Today's not-yet-done ring uses the habit's own color — a nice
+            // per-habit touch, while "done" itself is always the same
+            // satisfying green regardless of the habit's theme.
             border: Border.all(
-              color: isToday && !done ? AppColors.primary : Colors.transparent,
+              color: isToday && !done ? color : Colors.transparent,
               width: 2,
             ),
+            boxShadow: done
+                ? [
+                    BoxShadow(
+                      color: AppColors.success.withValues(alpha: 0.4),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
           ),
           child: AnimatedScale(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutBack,
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.elasticOut,
             scale: done ? 1 : 0,
-            child: Icon(Icons.check_rounded,
-                size: 18,
-                color: future ? AppColors.textHint : AppColors.textPrimary),
+            child: const Icon(Icons.check_rounded, size: 18, color: Colors.white),
           ),
         ),
       ]),

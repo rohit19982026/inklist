@@ -3,42 +3,37 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_theme.dart';
 
-/// A celebratory burst shown when a Pomodoro work session completes — a
-/// "PUBG chicken dinner"-style payoff for finishing a full focus session.
-/// The animation itself is plain hand-rolled Flutter (no confetti/particle
-/// package) so it never depends on a third-party lib; only the message text
-/// is AI-generated, and even that starts from an instant local fallback so
-/// the celebration never waits on a network call to appear.
-class FocusCelebrationOverlay extends StatefulWidget {
+/// A generic celebratory burst — a "PUBG chicken dinner"-style payoff shown
+/// on a satisfying completion moment (a finished Pomodoro session, a habit
+/// checked off for the day, etc). The animation itself is plain hand-rolled
+/// Flutter (no confetti/particle package) so it never depends on a
+/// third-party lib; message text can optionally be swapped in later (e.g.
+/// AI-generated) once it resolves, but always starts from an instant local
+/// message so the celebration never waits on a network call to appear.
+class CelebrationOverlay extends StatefulWidget {
   final String message;
   final Future<String?>? betterMessage;
+  final IconData icon;
+  final Color iconColor;
 
-  const FocusCelebrationOverlay({
+  const CelebrationOverlay({
     super.key,
     required this.message,
     this.betterMessage,
+    this.icon = Icons.celebration_rounded,
+    this.iconColor = AppColors.primary,
   });
 
-  static const List<String> localMessages = [
-    'Nice focus! 🔥',
-    'That\'s a full session.',
-    'Deep work, done.',
-    'One more in the books.',
-    'Momentum builder.',
-    'Locked in — nailed it.',
-  ];
-
-  static String randomLocalMessage() =>
-      localMessages[math.Random().nextInt(localMessages.length)];
-
   /// Shows the overlay immediately with [message]; if [betterMessage]
-  /// resolves (an AI-generated line) while the overlay is still on screen,
-  /// the text hot-swaps in with a brief fade. Auto-dismisses on its own —
-  /// callers don't need to await this beyond fire-and-forget.
+  /// resolves (e.g. an AI-generated line) while the overlay is still on
+  /// screen, the text hot-swaps in with a brief fade. Auto-dismisses on its
+  /// own — callers don't need to await this beyond fire-and-forget.
   static Future<void> show(
     BuildContext context, {
     required String message,
     Future<String?>? betterMessage,
+    IconData icon = Icons.celebration_rounded,
+    Color iconColor = AppColors.primary,
   }) {
     return showGeneralDialog<void>(
       context: context,
@@ -46,9 +41,11 @@ class FocusCelebrationOverlay extends StatefulWidget {
       barrierLabel: 'Dismiss',
       barrierColor: Colors.black.withValues(alpha: 0.35),
       transitionDuration: const Duration(milliseconds: 220),
-      pageBuilder: (_, __, ___) => FocusCelebrationOverlay(
+      pageBuilder: (_, __, ___) => CelebrationOverlay(
         message: message,
         betterMessage: betterMessage,
+        icon: icon,
+        iconColor: iconColor,
       ),
       transitionBuilder: (_, anim, __, child) =>
           FadeTransition(opacity: anim, child: child),
@@ -56,11 +53,10 @@ class FocusCelebrationOverlay extends StatefulWidget {
   }
 
   @override
-  State<FocusCelebrationOverlay> createState() =>
-      _FocusCelebrationOverlayState();
+  State<CelebrationOverlay> createState() => _CelebrationOverlayState();
 }
 
-class _FocusCelebrationOverlayState extends State<FocusCelebrationOverlay>
+class _CelebrationOverlayState extends State<CelebrationOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _burst;
   late final List<_Particle> _particles;
@@ -156,14 +152,13 @@ class _FocusCelebrationOverlayState extends State<FocusCelebrationOverlay>
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.35),
+                color: widget.iconColor.withValues(alpha: 0.35),
                 blurRadius: 24,
                 spreadRadius: 2,
               ),
             ],
           ),
-          child: const Icon(Icons.local_fire_department_rounded,
-              color: AppColors.primary, size: 44),
+          child: Icon(widget.icon, color: widget.iconColor, size: 44),
         )
             .animate()
             .scale(

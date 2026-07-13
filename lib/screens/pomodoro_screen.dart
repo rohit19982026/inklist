@@ -15,7 +15,7 @@ import '../services/alarm_scheduler_service.dart';
 import '../services/behavior_insights_service.dart';
 import '../services/habit_service.dart';
 import '../widgets/ink_widgets.dart';
-import '../widgets/focus_celebration_overlay.dart';
+import '../widgets/celebration_overlay.dart';
 
 /// InkList "Focus" — a Pomodoro timer. Classic 25/5/15 cycles with a long
 /// break every N rounds, an optional bound task, an AI focus coach, and a
@@ -253,14 +253,26 @@ class _PomodoroScreenState extends State<PomodoroScreen>
     }
   }
 
+  static const _localCelebrationMessages = [
+    'Nice focus! 🔥',
+    'That\'s a full session.',
+    'Deep work, done.',
+    'One more in the books.',
+    'Momentum builder.',
+    'Locked in — nailed it.',
+  ];
+
   /// Shows the celebration overlay immediately with an instant local
   /// message, then swaps in an AI-generated one if it arrives in time — the
   /// celebration itself never waits on the network.
   void _celebrateFocusSession() {
-    FocusCelebrationOverlay.show(
+    CelebrationOverlay.show(
       context,
-      message: FocusCelebrationOverlay.randomLocalMessage(),
+      message: _localCelebrationMessages[
+          math.Random().nextInt(_localCelebrationMessages.length)],
       betterMessage: _fetchCelebrationMessage(),
+      icon: Icons.local_fire_department_rounded,
+      iconColor: AppColors.primary,
     );
   }
 
