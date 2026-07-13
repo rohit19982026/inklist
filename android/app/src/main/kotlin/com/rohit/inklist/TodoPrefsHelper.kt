@@ -3,6 +3,7 @@ package com.rohit.inklist
 import android.content.Context
 import org.json.JSONArray
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -15,13 +16,22 @@ data class AlarmTaskInfo(
     val recurrenceRule: String,
 )
 
+/** One task occurring today, for the home-screen widget. */
+data class WidgetTaskInfo(
+    val title: String,
+    val done: Boolean,
+    val priority: String,
+    val hasTime: Boolean,
+    val hour: Int,
+    val minute: Int,
+)
+
 /**
  * Reads/writes the same 'flutter.todo_tasks_v1' JSON blob that Flutter's
  * shared_preferences plugin owns (Flutter always prefixes keys with
- * "flutter." in the underlying native SharedPreferences file — the same
- * technique MainActivity.updateWidget() already relies on for the home
- * screen widget). This lets native alarm code, which runs without a warm
- * Flutter engine, mark a task done or reschedule alarms directly.
+ * "flutter." in the underlying native SharedPreferences file). This lets
+ * native alarm/widget code, which runs without a warm Flutter engine, mark a
+ * task done, reschedule alarms, or read today's tasks directly.
  */
 object TodoPrefsHelper {
     private const val PREFS_NAME = "FlutterSharedPreferences"
@@ -86,6 +96,47 @@ object TodoPrefsHelper {
                     recurrenceRule = obj.optString("recurrenceRule", "none"),
                 )
             )
+        }
+        return out
+    }
+
+    /**
+     * Every task occurring today (recurring rule matches today, or a one-off
+     * task due today), with its completion state for today — mirrors
+     * TodoService.tasksForDay()/isCompletedOn() on the Dart side. Used by the
+     * home-screen widget, which has no Flutter engine to ask.
+     */
+    fun readTodayTasks(context: Context): List<WidgetTaskInfo> {
+        val tasks = readTasks(context)
+        val todayCal = Calendar.getInstance()
+        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(todayCal.time)
+        val out = mutableListOf<WidgetTaskInfo>()
+        for (i in 0 until tasks.length()) {
+            val obj = tasks.optJSONObject(i) ?: continue
+            val recurrenceRule = obj.optString("recurrenceRule", "none")
+            val title = obj.optString("title", "Task")
+            val priority = obj.optString("priority", "medium")
+            val alarmTime = obj.optJSONObject("alarmTime")
+            val hour = alarmTime?.optInt("h", -1) ?: -1
+            val minute = alarmTime?.optInt("m", 0) ?: 0
+            val hasTime = alarmTime != null
+
+            if (recurrenceRule != "none") {
+                if (!AlarmSchedulerHelper.occursOn(recurrenceRule, todayCal)) continue
+                val completedDates = obj.optJSONArray("completedDates")
+                val done = completedDates != null &&
+                    (0 until completedDates.length()).any { completedDates.optString(it) == todayKey }
+                out.add(WidgetTaskInfo(title, done, priority, hasTime, hour, minute))
+            } else {
+                val dueDateMillis = obj.optLong("dueDate", -1L)
+                if (dueDateMillis < 0) continue
+                val dueCal = Calendar.getInstance().apply { timeInMillis = dueDateMillis }
+                val sameDay = dueCal.get(Calendar.YEAR) == todayCal.get(Calendar.YEAR) &&
+                    dueCal.get(Calendar.DAY_OF_YEAR) == todayCal.get(Calendar.DAY_OF_YEAR)
+                if (!sameDay) continue
+                val done = obj.optBoolean("isCompleted", false)
+                out.add(WidgetTaskInfo(title, done, priority, hasTime, hour, minute))
+            }
         }
         return out
     }

@@ -121,6 +121,12 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
 
+                    // ── Home-screen widget ────────────────────────────────────
+                    "updateWidget" -> {
+                        InkListWidgetProvider.updateAll(this)
+                        result.success(null)
+                    }
+
                     else -> result.notImplemented()
                 }
             }

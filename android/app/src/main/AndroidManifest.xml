@@ -76,6 +76,16 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"/>
 
+        <!-- Home-screen widget: today's task count + top 3 open tasks -->
+        <receiver android:name=".InkListWidgetProvider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/inklist_widget_info"/>
+        </receiver>
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>

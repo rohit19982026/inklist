@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">InkList</string>
+    <string name="widget_description">Today\'s tasks at a glance</string>
+    <string name="widget_title">Today</string>
+    <string name="widget_empty">Nothing planned — tap to add</string>
 </resources>
