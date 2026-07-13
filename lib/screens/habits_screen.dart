@@ -11,6 +11,7 @@ import '../services/data_sync.dart';
 import '../services/todo_service.dart';
 import '../services/pomodoro_service.dart';
 import '../services/behavior_insights_service.dart';
+import '../services/ai_feedback_service.dart';
 import '../widgets/ink_widgets.dart';
 import 'settings_screen.dart';
 
@@ -136,9 +137,11 @@ class _HabitsScreenState extends State<HabitsScreen> with WidgetsBindingObserver
       habits: _habits,
       sessions: sessions,
     );
+    final feedbackContext = await AiFeedbackService.summarize();
     final result = await GroqService.suggestHabits(
       _habits.map((h) => h.title).toList(),
       behaviorContext: behaviorContext,
+      feedbackContext: feedbackContext,
     );
     if (!mounted) return;
     setState(() => _suggesting = false);
@@ -159,6 +162,7 @@ class _HabitsScreenState extends State<HabitsScreen> with WidgetsBindingObserver
       backgroundColor: Colors.transparent,
       builder: (_) => _SuggestionSheet(suggestions: result.data!),
     );
+    AiFeedbackService.logHabitSuggestionOutcome(accepted: chosen != null);
     if (chosen == null || !mounted) return;
     if (!_isPro && _habits.length >= EntitlementService.maxFreeHabits) {
       _showProGate();

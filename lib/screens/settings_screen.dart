@@ -11,6 +11,8 @@ import '../services/notification_permission_service.dart';
 import '../services/alarm_tone_service.dart';
 import '../services/google_calendar_service.dart';
 import '../services/mcp_bridge_service.dart';
+import '../services/pomodoro_service.dart';
+import '../services/reminder_schedule_advisor.dart';
 import '../models/todo_task.dart';
 import 'font_picker_screen.dart';
 import 'alarm_tone_picker_screen.dart';
@@ -34,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notificationsPermanentlyDenied = false;
   bool _smartRemindersEnabled = false;
   List<TimeOfDayMs> _smartReminderTimes = SmartReminderService.defaultTimes;
+  List<TimeOfDayMs>? _suggestedCheckInTimes;
   String _alarmToneTitle = 'Default';
   bool _calendarSyncEnabled = false;
   bool _calendarSignedIn = false;
@@ -77,8 +80,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : Future.value(null),
       kEnableMcpConnector ? MCPBridgeService.getToken() : Future.value(''),
     ]);
+    final sessions = await PomodoroService.getSessions();
+    final suggestedTimes = ReminderScheduleAdvisor.suggestCheckInTimes(sessions);
     if (!mounted) return;
     setState(() {
+      _suggestedCheckInTimes = suggestedTimes;
       _aiEnabled = r[0] as bool;
       _groqApiKey = r[1] as String?;
       _canScheduleExactAlarms = r[2] as bool;
@@ -417,6 +423,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         },
                       ),
                     ),
+                    if (_suggestedCheckInTimes != null)
+                      _settingRow(
+                        icon: Icons.insights_rounded,
+                        tint: AppColors.accent,
+                        title: 'Suggested Times (from your focus sessions)',
+                        value: _suggestedCheckInTimes!
+                            .map((t) => TimeOfDay(hour: t.hour, minute: t.minute)
+                                .format(context))
+                            .join(', '),
+                        trailing: TextButton(
+                          onPressed: _applySuggestedCheckInTimes,
+                          child: Text('Use These',
+                              style: T.footnote(c: AppColors.accent)
+                                  .copyWith(fontWeight: FontWeight.w700)),
+                        ),
+                      ),
                     _settingRow(
                       icon: Icons.schedule_rounded,
                       tint: AppColors.primary,
@@ -735,6 +757,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ── Smart Reminders dialog ─────────────────────────────────────────────────
+  /// Applies the locally-computed suggested check-in times (see
+  /// ReminderScheduleAdvisor) — never automatic, only ever applied when the
+  /// user explicitly taps "Use These".
+  Future<void> _applySuggestedCheckInTimes() async {
+    final suggested = _suggestedCheckInTimes;
+    if (suggested == null) return;
+    await SmartReminderService.setCheckInTimes(suggested);
+    await SmartReminderService.syncSchedule();
+    _load();
+  }
+
   Future<void> _editSmartReminderTimes() async {
     var times = List<TimeOfDayMs>.from(_smartReminderTimes);
     final saved = await showDialog<bool>(

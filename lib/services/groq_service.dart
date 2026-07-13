@@ -20,6 +20,7 @@ class GroqService {
   static const _apiKeyPrefKey = 'groq_api_key';
   static const _aiEnabledPrefKey = 'ai_features_enabled';
   static const _dailyBriefCacheKey = 'ai_daily_brief_cache';
+  static const _weeklyReviewCacheKey = 'ai_weekly_review_cache';
   static const _timeout = Duration(seconds: 20);
 
   // ── Key management ──────────────────────────────────────────────────────
@@ -72,6 +73,28 @@ class GroqService {
     final p = await SharedPreferences.getInstance();
     await p.setString(_dailyBriefCacheKey,
         jsonEncode({'date': _isoDate(DateTime.now()), 'text': text}));
+  }
+
+  // ── Weekly review cache (keyed by ISO week, not date, so it persists all
+  // week once generated rather than regenerating every day) ───────────────
+  static Future<String?> getCachedWeeklyReview() async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getString(_weeklyReviewCacheKey);
+    if (raw == null) return null;
+    try {
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      final cachedWeek = j['week'] as String?;
+      if (cachedWeek != _isoWeekKey(DateTime.now())) return null;
+      return j['text'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> setCachedWeeklyReview(String text) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_weeklyReviewCacheKey,
+        jsonEncode({'week': _isoWeekKey(DateTime.now()), 'text': text}));
   }
 
   // ── Connectivity check ──────────────────────────────────────────────────
@@ -190,7 +213,47 @@ class GroqService {
     return parseDailyBriefResponse(resp.data!);
   }
 
-  static Future<GroqResult<QuickAddDraft>> parseQuickAdd(String freeText) async {
+  /// A short weekly-review narrative built entirely from [behaviorContext]
+  /// (the same 14-day snapshot every other behavior-aware feature uses) —
+  /// no task list needed, since the point is reflecting on the week's
+  /// patterns rather than today's to-dos.
+  static Future<GroqResult<String>> weeklyRetrospective(
+    Map<String, dynamic> behaviorContext,
+  ) async {
+    final key = await getApiKey();
+    if (key == null || key.isEmpty) {
+      return const GroqResult.fail(
+          'Add your Groq API key in Settings to use AI features');
+    }
+    if (behaviorContext.length <= 1) {
+      // Only windowDays present — nothing to reflect on yet.
+      return const GroqResult.fail('Not enough history yet for a weekly review');
+    }
+    const system = 'You are writing a short weekly review for a personal '
+        'to-do app, based on a "behavior" object summarizing the user\'s '
+        'actual patterns over the last ~2 weeks (completion rates '
+        'overall/by weekday/by priority, recurring tasks that keep getting '
+        'missed, habit streaks, focus-session activity). Write 3-5 '
+        'sentences that read like a real reflection, not generic '
+        'encouragement — cite specific numbers or named patterns from the '
+        'data (e.g. a completion-rate change, a specific chronically-'
+        'missed task, a habit streak). If the data is thin, keep it '
+        'short and honest rather than padding with fluff. No greetings, '
+        'no sign-off.';
+    final payload = jsonEncode({'behavior': behaviorContext});
+    final resp = await _post(key, [
+      {'role': 'system', 'content': system},
+      {'role': 'user', 'content': payload},
+    ], jsonMode: false);
+    if (!resp.isSuccess) return GroqResult.fail(resp.error);
+    return parseDailyBriefResponse(resp.data!);
+  }
+
+  /// Parses free text into one or more structured tasks — e.g. "buy milk,
+  /// call mom tomorrow, and finish the report by Friday" becomes 3 separate
+  /// drafts rather than being mangled into one.
+  static Future<GroqResult<List<QuickAddDraft>>> parseQuickAddMulti(
+      String freeText) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
       return const GroqResult.fail(
@@ -201,11 +264,15 @@ class GroqService {
     }
     final now = DateTime.now();
     final weekday = _weekdayName(now.weekday);
-    final system = 'Parse this into a structured task. Respond with JSON: '
-        '{"title": string, "dueDate": "yyyy-MM-dd", "time": "HH:MM"|null, '
-        '"recurrence": "none"|"daily"|"weekly:MON,..."|"monthly:N"|'
-        '"monthly:last", "priority": "low"|"medium"|"high"}. Today is '
-        '$weekday, ${_isoDate(now)}. If no date is mentioned, use today. '
+    final system = 'Parse this into one or more structured tasks. Split on '
+        'commas, "and", or line breaks when the text clearly describes '
+        'more than one task — e.g. "buy milk, call mom tomorrow, and '
+        'finish the report by Friday" is 3 tasks, not 1. Respond with '
+        'JSON: {"tasks": [{"title": string, "dueDate": "yyyy-MM-dd", '
+        '"time": "HH:MM"|null, "recurrence": "none"|"daily"|'
+        '"weekly:MON,..."|"monthly:N"|"monthly:last", "priority": '
+        '"low"|"medium"|"high"}, ...]}. Today is $weekday, '
+        '${_isoDate(now)}. If no date is mentioned for a task, use today. '
         'If a recurring pattern like \'every 1st of the month\' or \'every '
         'Monday\' is mentioned, set recurrence accordingly and set dueDate '
         'to the next occurrence.';
@@ -214,7 +281,7 @@ class GroqService {
       {'role': 'user', 'content': freeText},
     ], jsonMode: true);
     if (!resp.isSuccess) return GroqResult.fail(resp.error);
-    return parseQuickAddResponse(resp.data!);
+    return parseQuickAddMultiResponse(resp.data!);
   }
 
   /// AI focus coach for the Pomodoro tab: given the user's pending tasks,
@@ -267,6 +334,7 @@ class GroqService {
   static Future<GroqResult<List<String>>> suggestHabits(
     List<String> existingTitles, {
     Map<String, dynamic>? behaviorContext,
+    Map<String, dynamic>? feedbackContext,
   }) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
@@ -279,17 +347,28 @@ class GroqService {
     final system = 'You suggest daily habits for a habit tracker. The user '
         'already tracks: $existing. The user message may include a '
         '"behavior" object with "habitStreaks" (title/streak/completion '
-        'rate for their existing habits) and task-completion patterns. If '
-        'a tracked habit has a low completion rate, suggest something '
-        'easier or differently-timed as a complement rather than piling on '
-        'more of the same difficulty; if their streaks are strong, feel '
-        'free to suggest something a bit more ambitious. Suggest 5 '
-        'concrete, specific, doable daily habits that complement what they '
-        'already track without duplicating them. Keep each under 4 words, '
+        'rate for their existing habits) and task-completion patterns, and '
+        'a "feedback" object showing how often past habit suggestions were '
+        'actually adopted ("habitSuggestions": {total, acceptedPercent}) — '
+        'if acceptedPercent is low, suggestions have been missing the mark, '
+        'so lean toward smaller/easier/more concrete ideas. If a tracked '
+        'habit has a low completion rate, suggest something easier or '
+        'differently-timed as a complement rather than piling on more of '
+        'the same difficulty; if their streaks are strong, feel free to '
+        'suggest something a bit more ambitious. Suggest 5 concrete, '
+        'specific, doable daily habits that complement what they already '
+        'track without duplicating them. Keep each under 4 words, '
         'action-oriented (e.g. "Drink 2L water", "Read 10 pages"). Respond '
         'ONLY with JSON: {"habits": [string, ...]}.';
-    final userContent = behaviorContext != null && behaviorContext.isNotEmpty
-        ? jsonEncode({'behavior': behaviorContext})
+    final hasContext = (behaviorContext != null && behaviorContext.isNotEmpty) ||
+        (feedbackContext != null && feedbackContext.isNotEmpty);
+    final userContent = hasContext
+        ? jsonEncode({
+            if (behaviorContext != null && behaviorContext.isNotEmpty)
+              'behavior': behaviorContext,
+            if (feedbackContext != null && feedbackContext.isNotEmpty)
+              'feedback': feedbackContext,
+          })
         : 'Suggest habits.';
     final resp = await _post(key, [
       {'role': 'system', 'content': system},
@@ -310,6 +389,7 @@ class GroqService {
     required DateTime dueDate,
     required String recurrenceRule,
     Map<String, dynamic>? behaviorContext,
+    Map<String, dynamic>? feedbackContext,
   }) async {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
@@ -325,8 +405,12 @@ class GroqService {
         'object with the user\'s actual completion patterns (completion '
         'rates by weekday, habit streaks) — use it as a secondary signal '
         'only when relevant, never override an obvious semantic cue from '
-        'the title. Respond ONLY with JSON: {"hour": 0-23, "minute": '
-        '0-59}.';
+        'the title. It may also include a "feedback" object '
+        '("alarmTimeSuggestions": {total, acceptedPercent, avgEditMinutes}) '
+        'showing how past suggestions of this kind were received — if '
+        'avgEditMinutes shows a consistent bias (e.g. users move suggested '
+        'times ~30 minutes later), shift your default accordingly. Respond '
+        'ONLY with JSON: {"hour": 0-23, "minute": 0-59}.';
     final payload = jsonEncode({
       'title': title,
       if (description != null && description.isNotEmpty)
@@ -336,6 +420,8 @@ class GroqService {
       'recurrence': recurrenceRule,
       if (behaviorContext != null && behaviorContext.isNotEmpty)
         'behavior': behaviorContext,
+      if (feedbackContext != null && feedbackContext.isNotEmpty)
+        'feedback': feedbackContext,
     });
     final resp = await _post(key, [
       {'role': 'system', 'content': system},
@@ -343,6 +429,51 @@ class GroqService {
     ], jsonMode: true, maxTokens: 60);
     if (!resp.isSuccess) return GroqResult.fail(resp.error);
     return parseAlarmTimeResponse(resp.data!);
+  }
+
+  /// AI-suggested priority for a brand-new task, mirroring
+  /// [suggestAlarmTime]'s "enhancement in front of a sensible default"
+  /// design — a manual pick always overrides this, and it's never offered
+  /// when editing an existing task (an established priority shouldn't be
+  /// second-guessed).
+  static Future<GroqResult<String>> suggestPriority({
+    required String title,
+    String? description,
+    required DateTime dueDate,
+    Map<String, dynamic>? behaviorContext,
+    Map<String, dynamic>? feedbackContext,
+  }) async {
+    final key = await getApiKey();
+    if (key == null || key.isEmpty) {
+      return const GroqResult.fail(
+          'Add your Groq API key in Settings to use AI features');
+    }
+    const system = 'Suggest a priority ("low", "medium", or "high") for '
+        'this task based on what it likely involves — bills, deadlines, '
+        'health/safety, and time-sensitive commitments lean high; routine '
+        'chores and open-ended items lean low; default to medium when '
+        'unclear. The user message may include a "behavior" object with '
+        'completion patterns by priority, and a "feedback" object '
+        '("prioritySuggestions": {total, acceptedPercent}) showing how '
+        'often past suggestions were kept as-is — if acceptedPercent is '
+        'low, be more conservative and default to medium more often. '
+        'Respond ONLY with JSON: {"priority": "low"|"medium"|"high"}.';
+    final payload = jsonEncode({
+      'title': title,
+      if (description != null && description.isNotEmpty)
+        'description': description,
+      'dueWeekday': _weekdayName(dueDate.weekday),
+      if (behaviorContext != null && behaviorContext.isNotEmpty)
+        'behavior': behaviorContext,
+      if (feedbackContext != null && feedbackContext.isNotEmpty)
+        'feedback': feedbackContext,
+    });
+    final resp = await _post(key, [
+      {'role': 'system', 'content': system},
+      {'role': 'user', 'content': payload},
+    ], jsonMode: true, maxTokens: 20);
+    if (!resp.isSuccess) return GroqResult.fail(resp.error);
+    return parsePriorityResponse(resp.data!);
   }
 
   // ── Pure parse functions (unit-testable, no network) ────────────────────
@@ -377,17 +508,37 @@ class GroqService {
     }
   }
 
-  static GroqResult<QuickAddDraft> parseQuickAddResponse(String rawContent) {
+  static GroqResult<List<QuickAddDraft>> parseQuickAddMultiResponse(
+      String rawContent) {
     try {
       final j = jsonDecode(rawContent) as Map<String, dynamic>;
-      final title = (j['title'] as String?)?.trim() ?? '';
-      if (title.isEmpty) {
+      final list = (j['tasks'] as List?) ?? const [];
+      final drafts = list
+          .whereType<Map<String, dynamic>>()
+          .map(QuickAddDraft.fromJson)
+          .where((d) => d.title.isNotEmpty)
+          .toList();
+      if (drafts.isEmpty) {
         return const GroqResult.fail('Could not understand that — try rephrasing');
       }
-      return GroqResult.ok(QuickAddDraft.fromJson(j));
+      return GroqResult.ok(drafts);
     } catch (_) {
       return const GroqResult.fail(
           'Groq returned an unexpected response — try again or add manually');
+    }
+  }
+
+  static GroqResult<String> parsePriorityResponse(String rawContent) {
+    try {
+      final j = jsonDecode(rawContent) as Map<String, dynamic>;
+      final priority = (j['priority'] as String?)?.trim().toLowerCase();
+      if (priority != 'low' && priority != 'medium' && priority != 'high') {
+        return const GroqResult.fail('Groq returned an invalid priority');
+      }
+      return GroqResult.ok(priority);
+    } catch (_) {
+      return const GroqResult.fail(
+          'Groq returned an unexpected response — try again or pick manually');
     }
   }
 
@@ -528,4 +679,15 @@ class GroqService {
   static String _weekdayName(int weekday) => const [
         'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
       ][weekday - 1];
+
+  /// A stable "year-Www" key identifying [date]'s ISO-8601 week — only
+  /// needs to be internally consistent (same week in → same key out) for
+  /// cache purposes, not a certified ISO week-numbering implementation.
+  static String _isoWeekKey(DateTime date) {
+    final thursday = date.add(Duration(days: 4 - date.weekday));
+    final ordinalDay =
+        thursday.difference(DateTime(thursday.year, 1, 1)).inDays + 1;
+    final week = ((ordinalDay - 1) / 7).floor() + 1;
+    return '${thursday.year}-W${week.toString().padLeft(2, '0')}';
+  }
 }

@@ -73,20 +73,20 @@ void main() {
     });
   });
 
-  group('parseQuickAddResponse', () {
-    test('parses a well-formed quick-add JSON body', () {
+  group('parseQuickAddMultiResponse', () {
+    test('parses a single-task quick-add JSON body', () {
       const raw = '''
       {
-        "title": "Pay rent",
-        "dueDate": "2026-04-01",
-        "time": "09:00",
-        "recurrence": "monthly:1",
-        "priority": "high"
+        "tasks": [
+          {"title": "Pay rent", "dueDate": "2026-04-01", "time": "09:00",
+           "recurrence": "monthly:1", "priority": "high"}
+        ]
       }
       ''';
-      final result = GroqService.parseQuickAddResponse(raw);
+      final result = GroqService.parseQuickAddMultiResponse(raw);
       expect(result.isSuccess, isTrue);
-      final draft = result.data!;
+      expect(result.data!.length, 1);
+      final draft = result.data!.first;
       expect(draft.title, 'Pay rent');
       expect(draft.dueDate, DateTime(2026, 4, 1));
       expect(draft.time?.hour, 9);
@@ -95,15 +95,41 @@ void main() {
       expect(draft.priority, 'high');
     });
 
-    test('missing title degrades to a fail', () {
-      const raw = '{"dueDate": "2026-04-01", "recurrence": "none"}';
-      final result = GroqService.parseQuickAddResponse(raw);
+    test('parses multiple tasks from one free-text input', () {
+      const raw = '''
+      {
+        "tasks": [
+          {"title": "Buy milk", "dueDate": "2026-04-01", "time": null,
+           "recurrence": "none", "priority": "low"},
+          {"title": "Call mom", "dueDate": "2026-04-02", "time": null,
+           "recurrence": "none", "priority": "medium"}
+        ]
+      }
+      ''';
+      final result = GroqService.parseQuickAddMultiResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data!.map((d) => d.title), ['Buy milk', 'Call mom']);
+    });
+
+    test('drops entries with an empty title rather than failing outright', () {
+      const raw = '''
+      {"tasks": [{"title": "", "dueDate": "2026-04-01"}, {"title": "Valid one", "dueDate": "2026-04-01"}]}
+      ''';
+      final result = GroqService.parseQuickAddMultiResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data!.length, 1);
+      expect(result.data!.first.title, 'Valid one');
+    });
+
+    test('empty tasks list degrades to a fail', () {
+      const raw = '{"tasks": []}';
+      final result = GroqService.parseQuickAddMultiResponse(raw);
       expect(result.isSuccess, isFalse);
     });
 
     test('malformed JSON degrades to GroqResult.fail rather than throwing', () {
-      const raw = '{"title": "Pay rent"';
-      final result = GroqService.parseQuickAddResponse(raw);
+      const raw = '{"tasks": [';
+      final result = GroqService.parseQuickAddMultiResponse(raw);
       expect(result.isSuccess, isFalse);
       expect(result.error, isNotNull);
     });
@@ -120,6 +146,34 @@ void main() {
         expect(() => RecurrenceRule.occursOn(r, DateTime(2026, 4, 1)),
             returnsNormally);
       }
+    });
+  });
+
+  group('parsePriorityResponse', () {
+    test('parses a valid priority', () {
+      const raw = '{"priority": "high"}';
+      final result = GroqService.parsePriorityResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data, 'high');
+    });
+
+    test('is case-insensitive', () {
+      const raw = '{"priority": "LOW"}';
+      final result = GroqService.parsePriorityResponse(raw);
+      expect(result.isSuccess, isTrue);
+      expect(result.data, 'low');
+    });
+
+    test('invalid priority value degrades to a fail', () {
+      const raw = '{"priority": "urgent"}';
+      final result = GroqService.parsePriorityResponse(raw);
+      expect(result.isSuccess, isFalse);
+    });
+
+    test('malformed JSON degrades to a fail rather than throwing', () {
+      const raw = '{"priority": "high"';
+      final result = GroqService.parsePriorityResponse(raw);
+      expect(result.isSuccess, isFalse);
     });
   });
 

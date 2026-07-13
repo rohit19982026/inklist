@@ -36,6 +36,8 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
   List<TodoTask> _all = const [];
   String? _brief;
   bool _briefLoading = false;
+  String? _weeklyReview;
+  bool _weeklyReviewLoading = false;
   bool _aiConfigured = false;
   List<CalendarEvent> _calendarEvents = const [];
 
@@ -67,16 +69,24 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
     final all = await TodoService.getAll();
     final configured = await GroqService.isConfigured;
     final cachedBrief = configured ? await GroqService.getCachedDailyBrief() : null;
+    final cachedWeeklyReview =
+        configured ? await GroqService.getCachedWeeklyReview() : null;
     final events = await _loadTodayCalendarEvents();
     if (!mounted) return;
     setState(() {
       _all = all;
       _aiConfigured = configured;
       _brief = cachedBrief;
+      _weeklyReview = cachedWeeklyReview;
       _calendarEvents = events;
       _loading = false;
     });
   }
+
+  /// The weekly-review card only makes sense once a review actually exists
+  /// for the current week, or on Monday (when it's most worth generating).
+  bool get _showWeeklyReview =>
+      _aiConfigured && (_weeklyReview != null || DateTime.now().weekday == DateTime.monday);
 
   /// Empty list unless the user has both enabled and signed in to Calendar
   /// sync — never blocks the rest of Today from loading (see
@@ -120,16 +130,42 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _persist(TodoTask t) async {
+  Future<void> _refreshWeeklyReview() async {
+    if (_weeklyReviewLoading) return;
+    setState(() => _weeklyReviewLoading = true);
+    final habits = await HabitService.getAll();
+    final sessions = await PomodoroService.getSessions();
+    final behaviorContext = BehaviorInsightsService.summarize(
+      tasks: _all,
+      habits: habits,
+      sessions: sessions,
+    );
+    final result = await GroqService.weeklyRetrospective(behaviorContext);
+    if (!mounted) return;
+    setState(() => _weeklyReviewLoading = false);
+    if (result.isSuccess) {
+      setState(() => _weeklyReview = result.data);
+      await GroqService.setCachedWeeklyReview(result.data!);
+    }
+  }
+
+  Future<void> _persist(TodoTask t, {bool showFeedback = true}) async {
     await TodoService.upsert(t);
     final ok = await AlarmSchedulerService.syncTaskAlarm(t);
     DataSync.notifyChanged();
-    if (mounted) await showAlarmSchedulingFeedback(context, t, ok);
+    if (showFeedback && mounted) {
+      await showAlarmSchedulingFeedback(context, t, ok);
+    }
   }
 
   Future<void> _openQuickAdd() async {
-    final t = await NlQuickAddSheet.show(context);
-    if (t != null) await _persist(t);
+    final tasks = await NlQuickAddSheet.show(context);
+    if (tasks == null || tasks.isEmpty) return;
+    // A single task keeps the existing per-task alarm-scheduling toast; a
+    // batch add would just spam it once per task, so it's suppressed there.
+    for (final t in tasks) {
+      await _persist(t, showFeedback: tasks.length == 1);
+    }
   }
 
   Future<void> _openPlanMyWeek() async => showWeeklyPlanFlow(context);
@@ -202,6 +238,11 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 sliver: SliverToBoxAdapter(child: _focusNote()),
               ),
+              if (_showWeeklyReview)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                  sliver: SliverToBoxAdapter(child: _weeklyReviewNote()),
+                ),
               if (timed.isNotEmpty)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -397,6 +438,37 @@ class _TodoScreenState extends State<TodoScreen> with WidgetsBindingObserver {
           ]),
           const SizedBox(height: 6),
           Text(_brief ?? 'Tap refresh to get today\'s priorities',
+              style: T.body(c: AppColors.textPrimary).copyWith(height: 1.35)),
+        ],
+      ),
+    );
+  }
+
+  Widget _weeklyReviewNote() {
+    return StickyNote(
+      color: AppColors.hlPeach,
+      tilt: 0.01,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.auto_awesome_rounded, size: 18, color: AppColors.accent),
+            const SizedBox(width: 8),
+            Text('This week', style: T.title3().copyWith(fontSize: 22)),
+            const Spacer(),
+            if (_weeklyReviewLoading)
+              const SizedBox(
+                  width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
+            else
+              GestureDetector(
+                onTap: _refreshWeeklyReview,
+                child: const Icon(Icons.refresh_rounded, size: 18, color: AppColors.textSecondary),
+              ),
+          ]),
+          const SizedBox(height: 6),
+          Text(_weeklyReview ?? 'Tap refresh for a look back at your week',
               style: T.body(c: AppColors.textPrimary).copyWith(height: 1.35)),
         ],
       ),

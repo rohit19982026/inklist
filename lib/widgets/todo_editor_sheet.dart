@@ -12,6 +12,8 @@ import '../services/behavior_insights_service.dart';
 import '../services/habit_service.dart';
 import '../services/pomodoro_service.dart';
 import '../services/todo_service.dart';
+import '../services/ai_feedback_service.dart';
+import '../services/duplicate_task_service.dart';
 
 /// Create / edit a to-do task. Forked from GoalEditorSheet's structure —
 /// same drag-handle/sheet-decoration/pill-row idioms.
@@ -63,6 +65,10 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
   bool _breakingDown = false;
   bool _alarmEnabled = false;
   bool _timeIsAiSuggested = false;
+  TimeOfDayMs? _aiSuggestedTimeSnapshot;
+  bool _priorityIsAiSuggested = false;
+  bool _priorityTouchedByUser = false;
+  TodoTask? _likelyDuplicate;
   Timer? _aiSuggestDebounce;
 
   @override
@@ -99,6 +105,8 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     // time set — new tasks get their first chance via the title field's
     // onChanged (see _maybeSuggestAlarmTime).
     _maybeSuggestAlarmTime();
+    _maybeSuggestPriority();
+    _checkDuplicate();
   }
 
   @override
@@ -134,12 +142,23 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
           : TimeOfDay.now(),
     );
     if (picked != null) {
+      final newTime = TimeOfDayMs(hour: picked.hour, minute: picked.minute);
+      if (_timeIsAiSuggested && _aiSuggestedTimeSnapshot != null) {
+        AiFeedbackService.logAlarmTimeOutcome(
+          accepted: false,
+          deltaMinutes: _minutesOfDay(newTime) -
+              _minutesOfDay(_aiSuggestedTimeSnapshot!),
+        );
+      }
       setState(() {
-        _time = TimeOfDayMs(hour: picked.hour, minute: picked.minute);
+        _time = newTime;
         _timeIsAiSuggested = false;
+        _aiSuggestedTimeSnapshot = null;
       });
     }
   }
+
+  int _minutesOfDay(TimeOfDayMs t) => t.hour * 60 + t.minute;
 
   Future<void> _onAlarmToggle(bool v) async {
     if (!v) {
@@ -268,6 +287,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     final behaviorContext = BehaviorInsightsService.summarize(
       tasks: tasks, habits: habits, sessions: sessions,
     );
+    final feedbackContext = await AiFeedbackService.summarize();
 
     final desc = _description.text.trim();
     final result = await GroqService.suggestAlarmTime(
@@ -277,6 +297,7 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
       dueDate: _dueDate,
       recurrenceRule: _recurrenceRule,
       behaviorContext: behaviorContext,
+      feedbackContext: feedbackContext,
     );
     // Re-check _time: the user may have picked one manually while this was
     // in flight, or turned the alarm back off.
@@ -286,7 +307,63 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
     setState(() {
       _time = result.data;
       _timeIsAiSuggested = true;
+      _aiSuggestedTimeSnapshot = result.data;
     });
+  }
+
+  /// AI-suggested priority, mirroring [_maybeSuggestAlarmTime] exactly but
+  /// only ever offered for a brand-new task — an existing task's priority
+  /// is meaningful data the user already set and shouldn't be second-guessed.
+  Future<void> _maybeSuggestPriority() async {
+    if (widget.existing != null || _priorityTouchedByUser) return;
+    final title = _title.text.trim();
+    if (title.isEmpty) return;
+    if (!await GroqService.isConfigured) return;
+
+    final tasks = await TodoService.getAll();
+    final habits = await HabitService.getAll();
+    final sessions = await PomodoroService.getSessions();
+    final behaviorContext = BehaviorInsightsService.summarize(
+      tasks: tasks, habits: habits, sessions: sessions,
+    );
+    final feedbackContext = await AiFeedbackService.summarize();
+
+    final desc = _description.text.trim();
+    final result = await GroqService.suggestPriority(
+      title: title,
+      description: desc.isEmpty ? null : desc,
+      dueDate: _dueDate,
+      behaviorContext: behaviorContext,
+      feedbackContext: feedbackContext,
+    );
+    if (!mounted ||
+        widget.existing != null ||
+        _priorityTouchedByUser ||
+        !result.isSuccess) {
+      return;
+    }
+    setState(() {
+      _priority = result.data!;
+      _priorityIsAiSuggested = true;
+    });
+  }
+
+  /// Local, offline near-duplicate check (see DuplicateTaskService) — never
+  /// blocks saving, just surfaces a small heads-up banner.
+  Future<void> _checkDuplicate() async {
+    final title = _title.text.trim();
+    if (title.isEmpty || widget.existing != null) {
+      if (_likelyDuplicate != null && mounted) {
+        setState(() => _likelyDuplicate = null);
+      }
+      return;
+    }
+    final tasks = await TodoService.getAll();
+    final openTasks =
+        tasks.where((t) => t.isRecurring || !t.isCompleted).toList();
+    final match = DuplicateTaskService.findLikelyDuplicate(title, openTasks);
+    if (!mounted) return;
+    setState(() => _likelyDuplicate = match);
   }
 
   /// Default alarm time when the user enables the alarm but picks no time.
@@ -321,6 +398,12 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
       ));
       return;
+    }
+    if (_timeIsAiSuggested) {
+      AiFeedbackService.logAlarmTimeOutcome(accepted: true, deltaMinutes: 0);
+    }
+    if (_priorityIsAiSuggested) {
+      AiFeedbackService.logPriorityOutcome(accepted: true);
     }
     final subtasks = <TodoSubtask>[];
     for (var i = 0; i < _subtasks.length; i++) {
@@ -391,7 +474,11 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                   setState(() {});
                   _aiSuggestDebounce?.cancel();
                   _aiSuggestDebounce = Timer(
-                      const Duration(milliseconds: 800), _maybeSuggestAlarmTime);
+                      const Duration(milliseconds: 800), () {
+                    _maybeSuggestAlarmTime();
+                    _maybeSuggestPriority();
+                    _checkDuplicate();
+                  });
                 },
               )),
               const SizedBox(height: 14),
@@ -462,11 +549,17 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                     if (_time != null) ...[
                       const Spacer(),
                       GestureDetector(
-                        onTap: () => setState(() {
-                          _time = null;
-                          _alarmEnabled = false;
-                          _timeIsAiSuggested = false;
-                        }),
+                        onTap: () {
+                          if (_timeIsAiSuggested) {
+                            AiFeedbackService.logAlarmTimeOutcome(accepted: false);
+                          }
+                          setState(() {
+                            _time = null;
+                            _alarmEnabled = false;
+                            _timeIsAiSuggested = false;
+                            _aiSuggestedTimeSnapshot = null;
+                          });
+                        },
                         child: const Icon(Icons.close_rounded,
                             size: 16, color: AppColors.textMuted),
                       ),
@@ -510,7 +603,21 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                     child: GestureDetector(
                       onTap: () {
                         HapticFeedback.lightImpact();
-                        setState(() => _priority = p.$1);
+                        if (_priorityIsAiSuggested && p.$1 != _priority) {
+                          const order = ['low', 'medium', 'high'];
+                          final oldIdx = order.indexOf(_priority);
+                          final newIdx = order.indexOf(p.$1);
+                          AiFeedbackService.logPriorityOutcome(
+                            accepted: false,
+                            changedDirection:
+                                newIdx > oldIdx ? 'higher' : 'lower',
+                          );
+                        }
+                        setState(() {
+                          _priority = p.$1;
+                          _priorityTouchedByUser = true;
+                          _priorityIsAiSuggested = false;
+                        });
                       },
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
@@ -527,6 +634,30 @@ class _TodoEditorSheetState extends State<TodoEditorSheet> {
                   );
                 }).toList(),
               ),
+              if (_priorityIsAiSuggested) ...[
+                const SizedBox(height: 4),
+                Row(children: [
+                  const Icon(Icons.auto_awesome_rounded,
+                      size: 12, color: AppColors.accent),
+                  const SizedBox(width: 4),
+                  Text('AI suggested — tap to change',
+                      style: T.caption2(c: AppColors.accent)),
+                ]),
+              ],
+              if (_likelyDuplicate != null) ...[
+                const SizedBox(height: 8),
+                Row(children: [
+                  const Icon(Icons.content_copy_rounded,
+                      size: 14, color: AppColors.warning),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Similar to "${_likelyDuplicate!.title}" — save anyway?',
+                      style: T.caption2(c: AppColors.warning),
+                    ),
+                  ),
+                ]),
+              ],
               const SizedBox(height: 14),
 
               _label('REPEAT'),
